@@ -1,0 +1,26 @@
+# One service that runs the website AND its API together.
+# Render reads this file when you create a "Blueprint" from your repo.
+services:
+  - type: web
+    name: education-academy
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build:web
+    startCommand: node server/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Paste these values in the Render dashboard (they are secret, so not stored here):
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_JUNIOR
+        sync: false
+      - key: STRIPE_PRICE_ADULT
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_WEB_URL
+        sync: false
