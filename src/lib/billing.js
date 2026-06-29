@@ -13,7 +13,13 @@ const PKG = "@revenuecat/purchases-capacitor";
 const API = import.meta.env.VITE_API_BASE || "/api";
 
 // Play / App Store product IDs (create these in the Play Console / App Store Connect).
-export const PRODUCT_IDS = { junior: "whisker_junior_monthly", adult: "whisker_adult_monthly" };
+// Each tier has a monthly and a yearly base plan; yearly is the cheaper-per-month annual option.
+export const PRODUCT_IDS = {
+  junior: { monthly: "whisker_junior_monthly", yearly: "whisker_junior_yearly" },
+  adult: { monthly: "whisker_adult_monthly", yearly: "whisker_adult_yearly" },
+};
+// Resolve a store product id from the entitlement tier and billing cycle ("monthly" | "annual").
+const productId = (plan, cycle) => PRODUCT_IDS[plan]?.[cycle === "annual" ? "yearly" : "monthly"];
 // RevenueCat entitlement identifiers.
 export const ENTITLEMENTS = { junior: "junior", adult: "adult" };
 
@@ -44,8 +50,8 @@ export async function getEntitlements() {
 }
 
 /* ---------------- Stripe (web build) ---------------- */
-async function stripeCheckout(plan) {
-  const r = await fetch(`${API}/stripe/checkout`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ plan }) });
+async function stripeCheckout(plan, cycle) {
+  const r = await fetch(`${API}/stripe/checkout`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ plan, cycle }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.url) throw new Error(j.error || "Couldn't start checkout.");
   window.location.assign(j.url);          // leaves the app for Stripe's hosted page
@@ -53,15 +59,19 @@ async function stripeCheckout(plan) {
 }
 
 /* ---------------- Public actions ---------------- */
-// Buy a plan. Returns { ok } (mock/play) or { ok:false, redirect:true } (web → Stripe).
-export async function purchase(plan) {
+// Buy a plan on a billing cycle ("monthly" | "annual"). Returns { ok } (mock/play) or
+// { ok:false, redirect:true } (web → Stripe).
+export async function purchase(plan, cycle = "monthly") {
   if (isMock) return { ok: true, mock: true };
-  if (provider === "stripe") return stripeCheckout(plan);
+  if (provider === "stripe") return stripeCheckout(plan, cycle);
   await configure();
   const Purchases = await rc();
   const offerings = await Purchases.getOfferings();
   const pkgs = offerings?.current?.availablePackages || [];
-  const pkg = pkgs.find((p) => (p.product?.identifier || p.identifier) === PRODUCT_IDS[plan]) || pkgs[0];
+  const wantId = productId(plan, cycle);
+  const pkg = pkgs.find((p) => (p.product?.identifier || p.identifier) === wantId)
+    || pkgs.find((p) => (p.product?.identifier || p.identifier) === productId(plan, "monthly"))
+    || pkgs[0];
   if (!pkg) throw new Error("That subscription isn't available right now.");
   const res = await Purchases.purchasePackage({ aPackage: pkg });
   return { ok: !!activeFromInfo(res)[plan] };
@@ -85,7 +95,11 @@ export async function getPrices() {
     const pkgs = offerings?.current?.availablePackages || [];
     const find = (id) => pkgs.find((p) => (p.product?.identifier || p.identifier) === id)?.product;
     const out = {};
-    for (const plan of ["junior", "adult"]) { const prod = find(PRODUCT_IDS[plan]); if (prod?.priceString) out[plan] = prod.priceString; }
+    // Flat keys keep back-compat: plan => monthly price string, `${plan}Annual` => yearly price string.
+    for (const plan of ["junior", "adult"]) {
+      const m = find(productId(plan, "monthly")); if (m?.priceString) out[plan] = m.priceString;
+      const y = find(productId(plan, "annual")); if (y?.priceString) out[`${plan}Annual`] = y.priceString;
+    }
     return Object.keys(out).length ? out : null;
   } catch { return null; }
 }

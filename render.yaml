@@ -20,7 +20,14 @@ services:
         sync: false
       - key: STRIPE_PRICE_ADULT
         sync: false
+      - key: STRIPE_PRICE_JUNIOR_YEARLY
+        sync: false
+      - key: STRIPE_PRICE_ADULT_YEARLY
+        sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: PUBLIC_WEB_URL
+        sync: false
+      # Admin secret for the weekly report + analytics funnel endpoints:
+      - key: ADMIN_SECRET
         sync: false

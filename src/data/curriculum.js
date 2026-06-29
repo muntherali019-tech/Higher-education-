@@ -58,10 +58,13 @@ export const TOPICS = {
 export const PLANS = {
   junior: {
     name: "Junior", price: "£3", covers: "Key Stage 1 & 2", color: "var(--ginger)",
+    // Annual = 12 months for the price of 10 (2 months free, ~17% off, £2.50/mo equivalent).
+    annual: "£30", annualPerMonth: "£2.50", saveText: "Save 17%",
     features: ["Unlimited 15-question rounds", "Homework photo marking", "Scan & solve any question", "Gentle, age-tuned tutor"],
   },
   adult: {
     name: "Adult", price: "£5", covers: "Key Stage 3 & Higher Education", color: "var(--purple)",
+    annual: "£50", annualPerMonth: "£4.17", saveText: "Save 17%",
     features: ["Everything in Junior", "KS3 maths, English & science", "University-level study help", "Step-by-step worked solutions"],
   },
 };

@@ -431,10 +431,85 @@ app.post("/api/admin/report", async (req, res) => {
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
+/* ---------- Privacy-first analytics (anonymous daily event counts — no PII) ---------- */
+// Stores only counts of whitelisted event names per UTC day, e.g.
+//   db.metrics["2026-06-29"] = { plans_view: 12, checkout_start: 3, purchase_success: 1 }
+// No identifiers, IPs, or personal data are recorded — this powers a conversion funnel
+// while keeping the app's "no third-party tracking / COPPA" promise intact.
+const ANALYTICS_EVENTS = new Set([
+  "app_open", "trial_start", "paywall_view", "plans_view",
+  "checkout_start", "purchase_success", "round_complete", "invite_click",
+]);
+const dayKey = (ts = Date.now()) => new Date(ts).toISOString().slice(0, 10);
+
+// Increment in memory; flush to the store at most every 10s so a burst of events can't
+// hammer the disk (write amplification / cheap DoS protection).
+let _metricsDirty = false;
+function bumpMetric(name) {
+  const db = load();
+  db.metrics = db.metrics || {};
+  const day = dayKey();
+  const bucket = db.metrics[day] = db.metrics[day] || {};
+  bucket[name] = (bucket[name] || 0) + 1;
+  _metricsDirty = true;
+}
+const _metricsTimer = setInterval(() => { if (_metricsDirty) { _metricsDirty = false; save(load()); } }, 10000);
+if (_metricsTimer.unref) _metricsTimer.unref();
+
+app.post("/api/event", (req, res) => {
+  const name = String(req.body?.name || "");
+  if (ANALYTICS_EVENTS.has(name)) bumpMetric(name);
+  res.status(204).end();    // always 204 — never leak which names are tracked
+});
+
+// Conversion funnel + rates for the last N days (admin-secret protected).
+app.get("/api/admin/funnel", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const db = load(); const metrics = db.metrics || {};
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  const since = dayKey(Date.now() - (days - 1) * 86400000);
+  const totals = {}; const daily = {};
+  for (const [day, counts] of Object.entries(metrics)) {
+    if (day < since) continue;
+    daily[day] = counts;
+    for (const [k, v] of Object.entries(counts)) totals[k] = (totals[k] || 0) + v;
+  }
+  const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : 0);
+  const views = (totals.plans_view || 0) + (totals.paywall_view || 0);
+  res.json({
+    days,
+    totals,
+    funnel: {
+      plans_view: totals.plans_view || 0,
+      paywall_view: totals.paywall_view || 0,
+      checkout_start: totals.checkout_start || 0,
+      purchase_success: totals.purchase_success || 0,
+      trial_start: totals.trial_start || 0,
+    },
+    rates: {
+      view_to_checkout: pct(totals.checkout_start || 0, views),
+      checkout_to_paid: pct(totals.purchase_success || 0, totals.checkout_start || 0),
+      trial_to_paid: pct(totals.purchase_success || 0, totals.trial_start || 0),
+    },
+    daily,
+  });
+});
+
 /* ---------- Stripe (web build payments) ---------- */
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
-const STRIPE_PRICES = { junior: process.env.STRIPE_PRICE_JUNIOR || "", adult: process.env.STRIPE_PRICE_ADULT || "" };
+const STRIPE_PRICES = {
+  junior: process.env.STRIPE_PRICE_JUNIOR || "",
+  adult: process.env.STRIPE_PRICE_ADULT || "",
+  junior_yearly: process.env.STRIPE_PRICE_JUNIOR_YEARLY || "",
+  adult_yearly: process.env.STRIPE_PRICE_ADULT_YEARLY || "",
+};
+// Resolve a Stripe price id from the entitlement tier (junior|adult) and billing cycle
+// (monthly|annual). Annual falls back to monthly if a yearly price hasn't been configured.
+function stripePriceId(plan, cycle) {
+  if (cycle === "annual") return STRIPE_PRICES[`${plan}_yearly`] || STRIPE_PRICES[plan];
+  return STRIPE_PRICES[plan];
+}
 const SITE_URL = process.env.PUBLIC_WEB_URL || "http://localhost:5173";
 
 async function stripeForm(path, params) {
@@ -452,7 +527,8 @@ async function stripeForm(path, params) {
 // customer's local currency (set per-currency prices in Stripe to control this).
 app.post("/api/stripe/checkout", async (req, res) => {
   if (!STRIPE_SECRET) return res.status(503).json({ error: "Stripe isn't configured on the server yet." });
-  const plan = req.body?.plan; const price = STRIPE_PRICES[plan];
+  const plan = req.body?.plan; const cycle = req.body?.cycle === "annual" ? "annual" : "monthly";
+  const price = stripePriceId(plan, cycle);
   if (!price) return res.status(400).json({ error: "Unknown plan or missing Stripe price ID." });
   const db = load(); const user = userFromReq(db, req); // optional: links the subscription to the account
   try {
@@ -464,7 +540,9 @@ app.post("/api/stripe/checkout", async (req, res) => {
       cancel_url: SITE_URL + "/?checkout=cancel",
       allow_promotion_codes: "true",
       "metadata[plan]": plan,
+      "metadata[cycle]": cycle,
       "subscription_data[metadata][plan]": plan,
+      "subscription_data[metadata][cycle]": cycle,
       ...(user ? { client_reference_id: user.id, customer_email: user.email, "metadata[uid]": user.id, "subscription_data[metadata][uid]": user.id } : {}),
     });
     res.json({ url: session.url });
@@ -497,8 +575,8 @@ const userByCustomer = (db, customer) => Object.values(db.users).find((u) => u.s
 function setUserPlan(user, plan, on) { user.subs = user.subs || { junior: false, adult: false }; if (plan === "junior" || plan === "adult") user.subs[plan] = !!on; }
 function planFromSubscription(sub) {
   const priceId = sub?.items?.data?.[0]?.price?.id;
-  if (priceId && priceId === STRIPE_PRICES.adult) return "adult";
-  if (priceId && priceId === STRIPE_PRICES.junior) return "junior";
+  if (priceId && (priceId === STRIPE_PRICES.adult || priceId === STRIPE_PRICES.adult_yearly)) return "adult";
+  if (priceId && (priceId === STRIPE_PRICES.junior || priceId === STRIPE_PRICES.junior_yearly)) return "junior";
   return undefined;
 }
 function handleStripeEvent(rawBuf, sig, res) {
@@ -523,12 +601,34 @@ function handleStripeEvent(rawBuf, sig, res) {
 
 /* ---------- Public legal & marketing pages (clean URLs, before the SPA fallback) ---------- */
 const MKT = path.join(ROOT, "marketing");
-const sendMkt = (file) => (req, res, next) => { const p = path.join(MKT, file); fs.existsSync(p) ? res.sendFile(p) : next(); };
+// Serve a marketing page, substituting %SITE% with the deployed base URL so SEO/social
+// (canonical, OpenGraph, Twitter, JSON-LD) tags resolve to absolute URLs.
+const sendMkt = (file) => (req, res, next) => {
+  const p = path.join(MKT, file);
+  if (!fs.existsSync(p)) return next();
+  try {
+    const html = fs.readFileSync(p, "utf8").replace(/%SITE%/g, SITE_URL);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch { res.sendFile(p); }
+};
 app.get(["/welcome", "/about"], sendMkt("index.html"));
 app.get("/privacy", sendMkt("privacy.html"));
 app.get("/terms", sendMkt("terms.html"));
 app.get("/support", sendMkt("support.html"));
 app.get("/status", sendMkt("status.html"));
+
+// SEO: robots + sitemap so search engines can discover the public pages.
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain").send(`User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+});
+app.get("/sitemap.xml", (_req, res) => {
+  const urls = ["/", "/welcome", "/privacy", "/terms", "/support", "/status"];
+  const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
+    + urls.map((u) => `  <url><loc>${SITE_URL}${u}</loc></url>`).join("\n")
+    + `\n</urlset>\n`;
+  res.type("application/xml").send(body);
+});
 
 /* ---------- Serve the built web app (one-service deploy). Run `npm run build:web` first. ---------- */
 const WEB_DIR = path.join(ROOT, "dist-web");

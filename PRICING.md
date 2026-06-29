@@ -2,6 +2,12 @@
 
 Base prices: **Junior £3/month** (KS1 & KS2), **Adult £5/month** (KS3, Higher Education & advanced courses). A 72-hour free trial precedes billing.
 
+**Annual plans (best value, ~17% off — 12 months for the price of 10):** Junior **£30/year** (£2.50/mo equivalent), Adult **£50/year** (£4.17/mo equivalent). The plans and paywall screens default to the annual cycle with a monthly/annual toggle; learners can switch either way.
+
+To enable annual on each store:
+- **Stripe (web):** create a recurring **yearly** Price on each Product and set `STRIPE_PRICE_JUNIOR_YEARLY` / `STRIPE_PRICE_ADULT_YEARLY` on the server. If unset, annual checkout falls back to the monthly price.
+- **Google Play (app):** add a **yearly** base plan to each subscription with product IDs `whisker_junior_yearly` and `whisker_adult_yearly` (alongside the existing monthly `whisker_junior_monthly` / `whisker_adult_monthly`).
+
 Both stores can **charge each user in their local currency**. You can let the store auto-convert from your base price, or set explicit per-country prices (recommended for clean, "charm" pricing like 4.99 instead of an odd converted figure).
 
 ## Google Play (the mobile app build)

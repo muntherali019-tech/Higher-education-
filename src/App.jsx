@@ -24,6 +24,7 @@ import { useT, setUiLang, resetTranslations, tf } from "./lib/i18n.js";
 import * as recog from "./lib/recognition.js";
 import * as review from "./lib/review.js";
 import * as trial from "./lib/trial.js";
+import { track } from "./lib/analytics.js";
 import { cheer } from "./lib/coach.js";
 import Languages from "./components/Languages.jsx";
 import Courses from "./components/Courses.jsx";
@@ -49,6 +50,23 @@ function ConsentCard({ onAccept }) {
       </p>
       <button className="bigbtn purple" onClick={onAccept}>A grown-up is here — continue</button>
       <p className="note" style={{ marginTop: 8 }}>You'll only see this once on this device.</p>
+    </div>
+  );
+}
+
+// Monthly / Annual billing-cycle switch shown on the plans & paywall screens.
+function CycleToggle({ cycle, setCycle, t }) {
+  const base = { fontFamily: "'Fredoka',sans-serif", fontWeight: 600, fontSize: 15, border: "none", borderRadius: 14, padding: "9px 16px", cursor: "pointer" };
+  const on = { ...base, background: "var(--ink, #43342a)", color: "#fff", boxShadow: "none" };
+  const off = { ...base, background: "#fff", color: "var(--ink, #43342a)", boxShadow: "0 3px 0 #ecdcc9" };
+  return (
+    <div style={{ display: "flex", gap: 8, justifyContent: "center", margin: "12px 0 2px" }}>
+      <button type="button" aria-pressed={cycle === "annual"} style={cycle === "annual" ? on : off} onClick={() => setCycle("annual")}>
+        {t("Annual")} · {t("Save 17%")}
+      </button>
+      <button type="button" aria-pressed={cycle === "monthly"} style={cycle === "monthly" ? on : off} onClick={() => setCycle("monthly")}>
+        {t("Monthly")}
+      </button>
     </div>
   );
 }
@@ -106,9 +124,11 @@ export default function App() {
   const svRef = useRef(null);
 
   // grown-ups gate (also used to gate purchases)
-  const [gate, setGate] = useState({ a: 7, b: 8, val: "", err: false, intent: "dashboard", plan: null });
+  const [gate, setGate] = useState({ a: 7, b: 8, val: "", err: false, intent: "dashboard", plan: null, cycle: "monthly" });
   const [buying, setBuying] = useState(false);
   const [buyError, setBuyError] = useState(null);
+  // Billing cycle for the plan screens. Default to annual to surface the best value (and lift LTV).
+  const [cycle, setCycle] = useState("annual");
   const [photoConsent, setPhotoConsent] = useState(() => { try { return localStorage.getItem("whisker.photoConsent") === "1"; } catch { return false; } });
 
   const goHome = () => { setScreen("home"); setKs(null); setSubject(null); setTopic(null); };
@@ -120,7 +140,7 @@ export default function App() {
     if (state.subs[planForKs(id)] || trial.trialActive()) { setKs(id); setSubject(null); setScreen("menu"); }
     else { setPendingKs(id); setScreen("paywall"); }
   }
-  function startTrialFor(id) { trial.startTrial(); if (id) { setKs(id); setSubject(null); setScreen("menu"); } else setScreen("home"); }
+  function startTrialFor(id) { const fresh = !trial.trialUsed(); trial.startTrial(); if (fresh) track("trial_start"); if (id) { setKs(id); setSubject(null); setScreen("menu"); } else setScreen("home"); }
 
   async function startRound(ksVal, subjectVal, topicName, count = ROUND_SIZE, isDaily = false) {
     setDailyActive(isDaily);
@@ -205,19 +225,19 @@ export default function App() {
     finally { setSolving(false); }
   }
 
-  function openGate(intent = "dashboard", plan = null) {
-    setGate({ a: 6 + Math.floor(Math.random() * 4), b: 6 + Math.floor(Math.random() * 4), val: "", err: false, intent, plan });
+  function openGate(intent = "dashboard", plan = null, cycle = "monthly") {
+    setGate({ a: 6 + Math.floor(Math.random() * 4), b: 6 + Math.floor(Math.random() * 4), val: "", err: false, intent, plan, cycle });
     setScreen("gate");
   }
   function checkGate() {
     if (Number(gate.val) !== gate.a * gate.b) { setGate((g) => ({ ...g, val: "", err: true })); return; }
-    if (gate.intent === "purchase" && gate.plan) confirmPurchase(gate.plan);
+    if (gate.intent === "purchase" && gate.plan) confirmPurchase(gate.plan, gate.cycle);
     else setScreen("dashboard");
   }
   // Purchases sit behind the grown-up gate (Google Play Families requirement) and go
   // through the billing abstraction (Play Billing-ready) rather than a direct unlock.
-  function requestPurchase(plan) { setBuyError(null); openGate("purchase", plan); }
-  async function confirmPurchase(plan) {
+  function requestPurchase(plan, cycle = "monthly") { setBuyError(null); track("checkout_start"); openGate("purchase", plan, cycle); }
+  async function confirmPurchase(plan, cycle = "monthly") {
     setBuying(true); setBuyError(null);
     try {
       if (billing.mode() === "stripe" && !cloud.getSession?.()?.token) {
@@ -226,9 +246,10 @@ export default function App() {
         setScreen("grownups");
         return;
       }
-      const r = await billing.purchase(plan);
+      const r = await billing.purchase(plan, cycle);
       if (r?.redirect) return;            // we're leaving for Stripe's hosted checkout page
       if (r?.ok) {
+        track("purchase_success");
         setState((s) => ({ ...s, subs: { ...s.subs, [plan]: true } }));
         if (pendingKs) { setKs(pendingKs); setSubject(null); setScreen("menu"); }
         else setScreen("plans");
@@ -256,6 +277,7 @@ export default function App() {
     setShareMsg(r === "copied" ? t("Copied! Paste it anywhere to share.") : "");
   }
   async function inviteFriend() {
+    track("invite_click");
     const url = myRef ? `${siteUrl()}/?ref=${myRef}` : siteUrl();
     const text = t("Come and learn with Mochi on Education Academy! 🐱") + (myRef ? " " + t("We'll both get bonus stars.") : "");
     const r = await shareThing({ text, url });
@@ -446,6 +468,13 @@ export default function App() {
     return () => { alive = false; };
   }, []);
   const priceFor = (plan) => (prices && prices[plan]) || PLANS[plan].price;
+  const annualPriceFor = (plan) => (prices && prices[`${plan}Annual`]) || PLANS[plan].annual;
+  // Privacy-first funnel: count app opens and key plan/paywall views (anonymous; see lib/analytics.js).
+  useEffect(() => { track("app_open"); }, []);
+  useEffect(() => {
+    if (screen === "plans") track("plans_view");
+    else if (screen === "paywall") track("paywall_view");
+  }, [screen]);
   // Web subscriptions live on the account: load them on launch, confirm after Stripe checkout,
   // surface the referral code, and claim any bonus stars from a friend's invite.
   const [checkoutDone, setCheckoutDone] = useState(false);
@@ -713,15 +742,18 @@ export default function App() {
             : !trial.trialUsed()
               ? <button className="bigbtn mint" onClick={() => startTrialFor(null)}>{t("Start your 72-hour free trial")}</button>
               : <p className="note" style={{ textAlign: "center" }}>{t("Your free trial has ended — subscribe to keep learning.")}</p>}
+          <CycleToggle cycle={cycle} setCycle={setCycle} t={t} />
           {Object.entries(PLANS).map(([key, p]) => (
             <div key={key} className="plan" style={{ background: p.color }}>
               <h3 className="fred">{p.name}</h3>
-              <div style={{ marginTop: 6 }}><span className="price">{priceFor(key)}</span><span style={{ fontWeight: 800 }}> {t("/month")}</span></div>
+              {cycle === "annual"
+                ? <div style={{ marginTop: 6 }}><span className="price">{annualPriceFor(key)}</span><span style={{ fontWeight: 800 }}> {t("/year")}</span><div style={{ fontWeight: 800, fontSize: 13, opacity: .95 }}>{tf("{pm}/mo · {save}", { pm: p.annualPerMonth, save: t("Save 17%") })}</div></div>
+                : <div style={{ marginTop: 6 }}><span className="price">{priceFor(key)}</span><span style={{ fontWeight: 800 }}> {t("/month")}</span></div>}
               <div style={{ fontWeight: 800, opacity: .95, marginTop: 2 }}>{p.covers}</div>
               <ul>{p.features.map((f) => <li key={f}><Check size={18} /> {f}</li>)}</ul>
               {state.subs[key]
                 ? <button className="planbtn active" disabled><Check size={16} style={{ verticalAlign: "-3px" }} /> Active</button>
-                : <button className="planbtn" onClick={() => requestPurchase(key)}>{tf("Subscribe — {price}/mo", { price: priceFor(key) })}</button>}
+                : <button className="planbtn" onClick={() => requestPurchase(key, cycle)}>{cycle === "annual" ? tf("Subscribe — {price}/yr", { price: annualPriceFor(key) }) : tf("Subscribe — {price}/mo", { price: priceFor(key) })}</button>}
             </div>
           ))}
           {buyError && <p className="err">{buyError}</p>}
@@ -743,12 +775,15 @@ export default function App() {
             </div>
             {!trial.trialUsed() && <button className="bigbtn mint" onClick={() => startTrialFor(pendingKs)}>{t("Start 72-hour free trial")}</button>}
             {trial.trialUsed() && !trial.trialActive() && <p className="note" style={{ textAlign: "center" }}>{t("Your free trial has ended.")}</p>}
+            <CycleToggle cycle={cycle} setCycle={setCycle} t={t} />
             <div className="plan" style={{ background: p.color }}>
               <h3 className="fred">{p.name}</h3>
-              <div style={{ marginTop: 6 }}><span className="price">{priceFor(plan)}</span><span style={{ fontWeight: 800 }}> {t("/month")}</span></div>
+              {cycle === "annual"
+                ? <div style={{ marginTop: 6 }}><span className="price">{annualPriceFor(plan)}</span><span style={{ fontWeight: 800 }}> {t("/year")}</span><div style={{ fontWeight: 800, fontSize: 13, opacity: .95 }}>{tf("{pm}/mo · {save}", { pm: p.annualPerMonth, save: t("Save 17%") })}</div></div>
+                : <div style={{ marginTop: 6 }}><span className="price">{priceFor(plan)}</span><span style={{ fontWeight: 800 }}> {t("/month")}</span></div>}
               <div style={{ fontWeight: 800, opacity: .95, marginTop: 2 }}>{p.covers}</div>
               <ul>{p.features.map((f) => <li key={f}><Check size={18} /> {f}</li>)}</ul>
-              <button className="planbtn" onClick={() => requestPurchase(plan)}>{tf("Subscribe & start — {price}/mo", { price: priceFor(plan) })}</button>
+              <button className="planbtn" onClick={() => requestPurchase(plan, cycle)}>{cycle === "annual" ? tf("Subscribe & start — {price}/yr", { price: annualPriceFor(plan) }) : tf("Subscribe & start — {price}/mo", { price: priceFor(plan) })}</button>
             </div>
             <p className="trustline">{t("Cancel anytime · No ads · Made for families")}</p>
             {buyError && <p className="err">{buyError}</p>}
