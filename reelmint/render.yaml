@@ -1,0 +1,29 @@
+# Render Blueprint — deploys Reelmint as a single web service.
+# In Render: New → Blueprint → connect this repo → set root directory to "reelmint".
+services:
+  - type: web
+    name: reelmint
+    runtime: node
+    plan: free
+    rootDir: reelmint
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Paste this in the Render dashboard (secret — not stored in the repo).
+      # Without it the app still runs in a built-in demo mode.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Optional overrides:
+      - key: AI_MODEL
+        value: claude-opus-4-8
+      # Optional: set to "1" to remove the free-tier watermark globally.
+      - key: REELMINT_NO_WATERMARK
+        sync: false
+      # Optional external image generator (any endpoint that returns {url} or {b64}).
+      - key: IMAGE_API_URL
+        sync: false
+      - key: IMAGE_API_KEY
+        sync: false
