@@ -3,14 +3,20 @@
 // .webm video via MediaRecorder.
 
 const $ = (s) => document.querySelector(s);
+
+let TOKEN = localStorage.getItem("reelmint_token") || "";
 const api = (path, body) =>
   fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}),
+    },
     body: JSON.stringify(body),
   }).then((r) => r.json());
 
 let CONFIG = { enabled: false, model: "demo", watermark: true, plans: [] };
+let USER = null; // logged-in user (or null)
 let storyboard = null; // current storyboard
 let chatLog = [];
 
@@ -26,7 +32,10 @@ const PALETTES = [
 init();
 async function init() {
   try {
-    CONFIG = await fetch("/api/config").then((r) => r.json());
+    CONFIG = await fetch("/api/config", {
+      headers: TOKEN ? { authorization: `Bearer ${TOKEN}` } : {},
+    }).then((r) => r.json());
+    USER = CONFIG.user || null;
   } catch {}
   const pill = $("#statusPill");
   pill.textContent = CONFIG.enabled ? `● AI live · ${CONFIG.model}` : "● demo mode";
@@ -34,6 +43,7 @@ async function init() {
   if (!CONFIG.enabled)
     $("#createHint").textContent =
       "Demo mode — add ANTHROPIC_API_KEY on the server for real AI output.";
+  renderAccount();
   renderFeatures();
   renderPlans();
   animateHero();
@@ -43,6 +53,8 @@ async function init() {
   wireImage();
   wireScan();
   wireRepurpose();
+  wireAuth();
+  handleReturnFromCheckout();
 }
 
 // ---------- tabs ----------
@@ -67,13 +79,25 @@ function wireCreate() {
     if (!topic) return toast("Type your idea first ✍️");
     busy($("#genBtn"), true, "Generating…");
     try {
-      storyboard = await api("/api/script", {
+      const res = await api("/api/script", {
         topic,
         platform: $("#platform").value,
         tone: $("#tone").value,
         durationSec: Number(dur.value),
         format: Number(dur.value) > 90 ? "long" : "short",
       });
+      if (res.error === "out_of_credits") {
+        USER = res.user || USER;
+        renderAccount();
+        toast("You're out of credits this month — upgrade to keep minting.");
+        location.hash = "#pricing";
+        return;
+      }
+      if (res.user) {
+        USER = res.user;
+        renderAccount();
+      }
+      storyboard = res;
       renderStoryboard();
       drawScene(0, 0.5);
       toast("Storyboard minted ✨ — preview or export it.");
@@ -492,8 +516,112 @@ function renderPlans() {
     )
     .join("");
 }
-window.reelmintCheckout = (id) =>
-  toast(id === "free" ? "You're on Free — start minting 🎉" : `Checkout for ${id} — wire up Stripe to go live.`);
+window.reelmintCheckout = async (id) => {
+  if (id === "free") return USER ? toast("You're set — start minting 🎉") : openAuth("signup");
+  if (!USER) return openAuth("signup");
+  if (!CONFIG.stripe)
+    return toast("Billing isn't configured on this server yet (set STRIPE keys).");
+  try {
+    const res = await api("/api/billing/checkout", { plan: id });
+    if (res.url) window.location.href = res.url;
+    else toast(res.error || "Couldn't start checkout.");
+  } catch {
+    toast("Checkout failed.");
+  }
+};
+
+// ---------- accounts ----------
+function renderAccount() {
+  const btn = $("#accountBtn");
+  if (USER) {
+    const c = USER.creditsLeft === "unlimited" ? "∞" : USER.creditsLeft;
+    btn.textContent = `${USER.plan.toUpperCase()} · ${c} left`;
+    btn.title = `${USER.email} — click to sign out`;
+  } else {
+    btn.textContent = "Sign in";
+    btn.title = "Sign in or create an account";
+  }
+}
+
+let authMode = "login";
+function wireAuth() {
+  $("#accountBtn").addEventListener("click", () => (USER ? logout() : openAuth("login")));
+  $("#authClose").addEventListener("click", closeAuth);
+  $("#authModal").addEventListener("click", (e) => e.target.id === "authModal" && closeAuth());
+  $("#authSwitch").addEventListener("click", (e) => {
+    e.preventDefault();
+    openAuth(authMode === "login" ? "signup" : "login");
+  });
+  $("#authSubmit").addEventListener("click", doAuth);
+  $("#authPass").addEventListener("keydown", (e) => e.key === "Enter" && doAuth());
+}
+
+function openAuth(mode) {
+  authMode = mode;
+  $("#authTitle").textContent = mode === "login" ? "Sign in to Reelmint" : "Create your account";
+  $("#authSubmit").textContent = mode === "login" ? "Sign in" : "Create account";
+  $("#authSwitchText").textContent = mode === "login" ? "New here?" : "Already have an account?";
+  $("#authSwitch").textContent = mode === "login" ? "Create an account" : "Sign in";
+  $("#authError").textContent = "";
+  $("#authModal").hidden = false;
+  $("#authEmail").focus();
+}
+function closeAuth() {
+  $("#authModal").hidden = true;
+}
+
+async function doAuth() {
+  const email = $("#authEmail").value.trim();
+  const password = $("#authPass").value;
+  if (!email || !password) return ($("#authError").textContent = "Enter email and password.");
+  busy($("#authSubmit"), true, "…");
+  try {
+    const res = await api(`/api/auth/${authMode}`, { email, password });
+    if (res.error) {
+      $("#authError").textContent = res.error;
+      return;
+    }
+    TOKEN = res.token;
+    localStorage.setItem("reelmint_token", TOKEN);
+    USER = res.user;
+    renderAccount();
+    closeAuth();
+    toast(`Welcome${authMode === "signup" ? "" : " back"}, ${USER.email.split("@")[0]} 👋`);
+  } catch {
+    $("#authError").textContent = "Something went wrong.";
+  } finally {
+    busy($("#authSubmit"), false, authMode === "login" ? "Sign in" : "Create account");
+  }
+}
+
+function logout() {
+  TOKEN = "";
+  USER = null;
+  localStorage.removeItem("reelmint_token");
+  renderAccount();
+  toast("Signed out.");
+}
+
+async function refreshMe() {
+  if (!TOKEN) return;
+  try {
+    const res = await fetch("/api/me", { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
+    USER = res.user;
+    renderAccount();
+  } catch {}
+}
+
+function handleReturnFromCheckout() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("upgraded")) {
+    refreshMe();
+    toast(`Upgraded to ${q.get("upgraded").toUpperCase()} 🎉`);
+    history.replaceState({}, "", location.pathname + "#pricing");
+  } else if (q.get("canceled")) {
+    toast("Checkout canceled.");
+    history.replaceState({}, "", location.pathname);
+  }
+}
 
 // ---------- hero animation ----------
 function animateHero() {

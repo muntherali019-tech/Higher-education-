@@ -22,8 +22,25 @@ services:
       # Optional: set to "1" to remove the free-tier watermark globally.
       - key: REELMINT_NO_WATERMARK
         sync: false
-      # Optional external image generator (any endpoint that returns {url} or {b64}).
+      # Signs login tokens — set a long random string (Render can generate one).
+      - key: AUTH_SECRET
+        generateValue: true
+      # Photoreal images (optional): set IMAGE_PROVIDER=openai + OPENAI_API_KEY,
+      # or use a custom endpoint via IMAGE_API_URL.
+      - key: IMAGE_PROVIDER
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
       - key: IMAGE_API_URL
         sync: false
       - key: IMAGE_API_KEY
+        sync: false
+      # Billing (optional): Stripe keys + price IDs + webhook secret.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_CREATOR
+        sync: false
+      - key: STRIPE_PRICE_STUDIO
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
         sync: false

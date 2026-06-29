@@ -22,6 +22,7 @@
         <a href="#features">Features</a>
         <a href="#pricing">Pricing</a>
         <a class="btn btn-ghost" id="statusPill" href="#studio">●</a>
+        <button class="btn btn-ghost" id="accountBtn">Sign in</button>
         <a class="btn btn-primary" href="#studio">Open studio</a>
       </nav>
     </header>
@@ -197,6 +198,23 @@
       <span>◉ Reelmint</span>
       <span class="muted">Built for creators. Mint something today.</span>
     </footer>
+
+    <!-- AUTH MODAL -->
+    <div class="modal" id="authModal" hidden>
+      <div class="modal-card">
+        <button class="modal-x" id="authClose">✕</button>
+        <h3 id="authTitle">Sign in to Reelmint</h3>
+        <p class="muted" id="authSub">Sign in to track credits and upgrade your plan.</p>
+        <label class="field"><span>Email</span><input id="authEmail" type="email" placeholder="you@email.com" /></label>
+        <label class="field"><span>Password</span><input id="authPass" type="password" placeholder="••••••" /></label>
+        <button class="btn btn-primary btn-block" id="authSubmit">Sign in</button>
+        <p class="hint" id="authError"></p>
+        <p class="muted switch-line">
+          <span id="authSwitchText">New here?</span>
+          <a href="#" id="authSwitch">Create an account</a>
+        </p>
+      </div>
+    </div>
 
     <div class="toast" id="toast"></div>
     <script src="/app.js"></script>

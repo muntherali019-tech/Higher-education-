@@ -20,7 +20,8 @@ step**, so it deploys to Render in minutes.
 | 🖼 **Instant images** | Mint posters, quote cards and thumbnails as downloadable PNGs ("Smart Slides"). Plug in any image API to swap in photoreal generation. |
 | 📷 **Scan & repurpose** | Upload a screenshot, photo or doc — Claude vision reads it and turns it into content. |
 | ✂️ **Long-form → clips** | Paste a transcript, get the most clip-worthy viral moments. |
-| 💸 **Revenue-ready** | Free / Creator / Studio tiers, credit limits, and a free-tier watermark — the levers competitors monetise with. Stripe hook is stubbed (`reelmintCheckout`). |
+| 👤 **Accounts + credits** | Email/password sign-in, with server-enforced monthly credits per plan (Free 5 · Creator 100 · Studio unlimited). |
+| 💸 **Live Stripe billing** | Real Stripe Checkout + webhook that upgrades the user's plan automatically. Free-tier watermark included. |
 
 ## How the AI works
 
@@ -65,6 +66,21 @@ The server binds to `process.env.PORT` (Render sets it automatically).
 
 ---
 
+## Accounts, credits & billing
+
+- **Accounts** — email/password, hashed with scrypt, signed login tokens (no external auth service). Users live in a JSON store (`server/store.js`); set `DATA_DIR` to a mounted disk for durability, or swap the store for Postgres/Redis for multi-instance production.
+- **Credits** — each plan has a monthly allowance (Free 5 · Creator 100 · Studio unlimited). Generating a storyboard spends 1 credit; the limit is enforced **server-side**. Anonymous visitors can still try the studio (no hard gate) so the demo stays open.
+- **Stripe** — set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_CREATOR`, `STRIPE_PRICE_STUDIO`, and `STRIPE_WEBHOOK_SECRET`. The pricing buttons open a real Checkout session; the webhook (`/api/billing/webhook`, signature-verified) upgrades the plan on success and downgrades on cancellation. Point your Stripe webhook at `https://<your-app>/api/billing/webhook` for `checkout.session.completed`, `customer.subscription.created`, and `customer.subscription.deleted`.
+
+## Photoreal images
+
+By default the **Image** tab renders "Smart Slide" posters (free, no external call). To get photoreal generation, wire a provider:
+
+- **OpenAI Images** — set `IMAGE_PROVIDER=openai` + `OPENAI_API_KEY` (optionally `IMAGE_MODEL`, default `gpt-image-1`).
+- **Any custom endpoint** — set `IMAGE_API_URL` (+ optional `IMAGE_API_KEY`); it receives `{prompt,width,height}` and should return `{url}` or `{b64}`.
+
+If a provider call fails it falls back to Smart Slides automatically.
+
 ## Environment variables
 
 | Var | Purpose |
@@ -72,16 +88,26 @@ The server binds to `process.env.PORT` (Render sets it automatically).
 | `ANTHROPIC_API_KEY` | Unlocks real AI. Blank → demo mode. |
 | `AI_MODEL` | Model id (default `claude-opus-4-8`). |
 | `PORT` | Port (Render sets this). |
+| `AUTH_SECRET` | Signs login tokens. **Required in production.** |
+| `DATA_DIR` | Where the user store is written (default `./.data`). |
 | `REELMINT_NO_WATERMARK` | `1` removes the free-tier watermark globally. |
-| `IMAGE_API_URL` / `IMAGE_API_KEY` | Optional external image generator (`{prompt,width,height}` → `{url}`/`{b64}`). |
+| `IMAGE_PROVIDER` / `OPENAI_API_KEY` / `IMAGE_MODEL` | OpenAI image generation. |
+| `IMAGE_API_URL` / `IMAGE_API_KEY` | Custom image generator. |
+| `STRIPE_SECRET_KEY` | Stripe API key. |
+| `STRIPE_PRICE_CREATOR` / `STRIPE_PRICE_STUDIO` | Stripe price IDs per plan. |
+| `STRIPE_WEBHOOK_SECRET` | Verifies incoming Stripe webhooks. |
 
 ## API
 
 | Endpoint | Body | Returns |
 |---|---|---|
 | `GET /api/health` | — | `{ ok, enabled, model }` |
-| `GET /api/config` | — | status + plans + watermark flag |
-| `POST /api/script` | `{topic, platform, tone, durationSec, format}` | storyboard |
+| `GET /api/config` | — | status + plans + watermark + current user |
+| `POST /api/auth/signup` · `/api/auth/login` | `{email, password}` | `{token, user}` |
+| `GET /api/me` | — (Bearer token) | `{user}` |
+| `POST /api/billing/checkout` | `{plan}` (Bearer token) | `{url}` (Stripe Checkout) |
+| `POST /api/billing/webhook` | Stripe event | upgrades/downgrades plan |
+| `POST /api/script` | `{topic, platform, tone, durationSec, format}` | storyboard (costs 1 credit) |
 | `POST /api/assistant` | `{instruction, storyboard}` | `{reply, storyboard}` |
 | `POST /api/image` | `{prompt, style}` | `{type:"design", design}` or `{type:"image", url}` |
 | `POST /api/scan` | `{base64, mediaType, instruction}` | `{text}` |
@@ -96,20 +122,23 @@ The server binds to `process.env.PORT` (Render sets it automatically).
 reelmint/
 ├── server/
 │   ├── index.js     # Express app + API routes
-│   └── ai.js        # Anthropic integration (+ demo fallback)
+│   ├── ai.js        # Anthropic integration (+ demo fallback)
+│   ├── auth.js      # accounts, tokens, monthly credit tracking
+│   ├── billing.js   # Stripe Checkout + webhook (REST, no SDK)
+│   ├── images.js    # photoreal image providers (+ fallback)
+│   └── store.js     # JSON-file persistence
 ├── public/
-│   ├── index.html   # landing + studio
+│   ├── index.html   # landing + studio + auth modal
 │   ├── styles.css
-│   └── app.js       # studio logic, canvas render, video export
+│   └── app.js       # studio logic, canvas render, video export, accounts
 ├── render.yaml      # Render Blueprint
 ├── package.json
 └── .env.example
 ```
 
-## Notes & next steps
+## Notes
 
 - **Video export** uses `MediaRecorder` (`.webm`) — best in Chromium/Edge/Firefox.
 - **Voice input/output** uses the Web Speech API (best in Chrome/Edge).
-- To go fully production: wire `reelmintCheckout` to Stripe Checkout, add user
-  accounts + persistent credit tracking, and (optionally) set `IMAGE_API_URL`
-  for photoreal image generation.
+- The JSON store is single-instance; for horizontal scaling on Render, move
+  `server/store.js` to Postgres/Redis. Everything else is already production-shaped.

@@ -9,12 +9,33 @@ import {
   generateText,
   visionExtract,
 } from "./ai.js";
+import {
+  signup,
+  login,
+  attachUser,
+  publicUser,
+  spendCredit,
+} from "./auth.js";
+import { stripeEnabled, createCheckout, handleWebhook } from "./billing.js";
+import { generateImage, imageProvider } from "./images.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 const app = express();
+
+// Stripe webhook needs the RAW body — mount it before the JSON parser.
+app.post(
+  "/api/billing/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const result = handleWebhook(req.body, req.headers["stripe-signature"]);
+    res.status(result.status).json({ received: result.ok });
+  }
+);
+
 app.use(express.json({ limit: "20mb" }));
+app.use(attachUser);
 app.use(express.static(PUBLIC_DIR));
 
 const NO_WATERMARK = process.env.REELMINT_NO_WATERMARK === "1";
@@ -30,15 +51,49 @@ const PALETTES = [
 // ---------- meta ----------
 app.get("/api/health", (_req, res) => res.json({ ok: true, ...aiStatus() }));
 
-app.get("/api/config", (_req, res) => {
+app.get("/api/config", (req, res) => {
   res.json({
     ...aiStatus(),
     watermark: !NO_WATERMARK,
     plans: PLANS,
+    stripe: stripeEnabled,
+    imageProvider,
+    user: publicUser(req.user),
   });
 });
 
-// ---------- storyboard / video script ----------
+// ---------- accounts ----------
+app.post("/api/auth/signup", (req, res) => {
+  try {
+    res.json(signup(req.body?.email, req.body?.password));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.post("/api/auth/login", (req, res) => {
+  try {
+    res.json(login(req.body?.email, req.body?.password));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.get("/api/me", (req, res) => res.json({ user: publicUser(req.user) }));
+
+// ---------- billing ----------
+app.post("/api/billing/checkout", async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: "Sign in first" });
+  if (!stripeEnabled)
+    return res.status(400).json({ error: "Billing not configured on this server" });
+  try {
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const url = await createCheckout({ user: req.user, plan: req.body?.plan, origin });
+    res.json({ url });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---------- storyboard / video script (costs 1 credit) ----------
 app.post("/api/script", async (req, res) => {
   const {
     topic = "",
@@ -48,6 +103,10 @@ app.post("/api/script", async (req, res) => {
     format = "short",
   } = req.body || {};
   if (!topic.trim()) return res.status(400).json({ error: "topic is required" });
+
+  const credit = spendCredit(req.user);
+  if (!credit.ok)
+    return res.status(402).json({ error: "out_of_credits", user: publicUser(req.user) });
 
   const sceneCount = Math.max(3, Math.min(8, Math.round(durationSec / 6)));
   const system =
@@ -75,7 +134,7 @@ ${schema}`,
     demo: demoStoryboard(topic, sceneCount),
   });
 
-  res.json(decorateStoryboard(data));
+  res.json({ ...decorateStoryboard(data), user: publicUser(req.user) });
 });
 
 // ---------- AI editor assistant (voice or text instructions) ----------
@@ -109,33 +168,15 @@ Return JSON: { "reply": string, "storyboard": { "title": string, "hook": string,
   res.json(data);
 });
 
-// ---------- picture / poster design ----------
+// ---------- picture / poster ----------
 app.post("/api/image", async (req, res) => {
   const { prompt = "", style = "bold" } = req.body || {};
   if (!prompt.trim()) return res.status(400).json({ error: "prompt is required" });
 
-  // If an external image generator is wired up, use it.
-  if (process.env.IMAGE_API_URL) {
-    try {
-      const r = await fetch(process.env.IMAGE_API_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(process.env.IMAGE_API_KEY
-            ? { authorization: `Bearer ${process.env.IMAGE_API_KEY}` }
-            : {}),
-        },
-        body: JSON.stringify({ prompt, width: 1080, height: 1080 }),
-      });
-      if (r.ok) {
-        const j = await r.json();
-        if (j.url || j.b64)
-          return res.json({ type: "image", url: j.url, b64: j.b64 });
-      }
-    } catch {
-      /* fall through to design spec */
-    }
-  }
+  // Try a real image provider first (photoreal).
+  const img = await generateImage({ prompt: `${prompt}. Style: ${style}.` });
+  if (img && (img.url || img.b64))
+    return res.json({ type: "image", url: img.url, b64: img.b64 });
 
   // Otherwise generate a "Smart Slide" design spec the browser renders to PNG.
   const design = await generateJSON({
@@ -270,5 +311,7 @@ function demoStoryboard(topic, sceneCount) {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Reelmint running on http://localhost:${PORT}  (AI: ${aiEnabled ? "live" : "demo"})`);
+  console.log(
+    `Reelmint on http://localhost:${PORT}  (AI: ${aiEnabled ? "live" : "demo"}, images: ${imageProvider}, stripe: ${stripeEnabled ? "on" : "off"})`
+  );
 });
