@@ -8,5 +8,6 @@ ios
 .vite
 dist-web
 dist-app
+dist-onefile
 server/data
 .env.local
