@@ -2,15 +2,17 @@
 # Render reads this file when you create a "Blueprint" from your repo.
 services:
   - type: web
-    name: education-academy
+    name: Higher-education-
     runtime: node
     plan: free
+    region: frankfurt
     buildCommand: npm install && npm run build:web
     startCommand: node server/index.js
     healthCheckPath: /api/health
+    autoDeployTrigger: commit
     envVars:
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
       # Paste these values in the Render dashboard (they are secret, so not stored here):
       - key: ANTHROPIC_API_KEY
         sync: false
