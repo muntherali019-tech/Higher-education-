@@ -9,6 +9,10 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# Async mode: install runs in the background while the session starts, which
+# reduces startup latency. Claude may begin before the install completes.
+echo '{"async": true, "asyncTimeout": 300000}'
+
 cd "$CLAUDE_PROJECT_DIR"
 
 # Install dependencies. `npm install` (not `npm ci`) so the cached container
