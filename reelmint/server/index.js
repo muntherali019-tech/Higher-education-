@@ -18,6 +18,7 @@ import {
 } from "./auth.js";
 import { stripeEnabled, createCheckout, handleWebhook } from "./billing.js";
 import { generateImage, imageProvider } from "./images.js";
+import { initStore, backend } from "./store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -28,8 +29,8 @@ const app = express();
 app.post(
   "/api/billing/webhook",
   express.raw({ type: "application/json" }),
-  (req, res) => {
-    const result = handleWebhook(req.body, req.headers["stripe-signature"]);
+  async (req, res) => {
+    const result = await handleWebhook(req.body, req.headers["stripe-signature"]);
     res.status(result.status).json({ received: result.ok });
   }
 );
@@ -63,16 +64,16 @@ app.get("/api/config", (req, res) => {
 });
 
 // ---------- accounts ----------
-app.post("/api/auth/signup", (req, res) => {
+app.post("/api/auth/signup", async (req, res) => {
   try {
-    res.json(signup(req.body?.email, req.body?.password));
+    res.json(await signup(req.body?.email, req.body?.password));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   try {
-    res.json(login(req.body?.email, req.body?.password));
+    res.json(await login(req.body?.email, req.body?.password));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -104,7 +105,7 @@ app.post("/api/script", async (req, res) => {
   } = req.body || {};
   if (!topic.trim()) return res.status(400).json({ error: "topic is required" });
 
-  const credit = spendCredit(req.user);
+  const credit = await spendCredit(req.user);
   if (!credit.ok)
     return res.status(402).json({ error: "out_of_credits", user: publicUser(req.user) });
 
@@ -310,8 +311,15 @@ function demoStoryboard(topic, sceneCount) {
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(
-    `Reelmint on http://localhost:${PORT}  (AI: ${aiEnabled ? "live" : "demo"}, images: ${imageProvider}, stripe: ${stripeEnabled ? "on" : "off"})`
-  );
-});
+initStore()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(
+        `Reelmint on http://localhost:${PORT}  (AI: ${aiEnabled ? "live" : "demo"}, store: ${backend}, images: ${imageProvider}, stripe: ${stripeEnabled ? "on" : "off"})`
+      );
+    });
+  })
+  .catch((e) => {
+    console.error("Failed to initialize store:", e.message);
+    process.exit(1);
+  });

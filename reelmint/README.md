@@ -68,7 +68,11 @@ The server binds to `process.env.PORT` (Render sets it automatically).
 
 ## Accounts, credits & billing
 
-- **Accounts** — email/password, hashed with scrypt, signed login tokens (no external auth service). Users live in a JSON store (`server/store.js`); set `DATA_DIR` to a mounted disk for durability, or swap the store for Postgres/Redis for multi-instance production.
+- **Accounts** — email/password, hashed with scrypt, signed login tokens (no external auth service).
+- **Storage** — `server/store.js` has two interchangeable backends behind one async API:
+  - **Postgres** (durable, multi-instance) — used automatically when `DATABASE_URL` is set. The table is created on boot; users are stored as JSONB. SSL is enabled by default for hosted databases (set `PGSSL=disable` for a local DB).
+  - **JSON file** (local/demo) — used when `DATABASE_URL` is absent, written to `DATA_DIR`.
+  The Render blueprint provisions a free Postgres and wires `DATABASE_URL` automatically, so accounts and billing survive restarts and redeploys.
 - **Credits** — each plan has a monthly allowance (Free 5 · Creator 100 · Studio unlimited). Generating a storyboard spends 1 credit; the limit is enforced **server-side**. Anonymous visitors can still try the studio (no hard gate) so the demo stays open.
 - **Stripe** — set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_CREATOR`, `STRIPE_PRICE_STUDIO`, and `STRIPE_WEBHOOK_SECRET`. The pricing buttons open a real Checkout session; the webhook (`/api/billing/webhook`, signature-verified) upgrades the plan on success and downgrades on cancellation. Point your Stripe webhook at `https://<your-app>/api/billing/webhook` for `checkout.session.completed`, `customer.subscription.created`, and `customer.subscription.deleted`.
 
@@ -89,7 +93,9 @@ If a provider call fails it falls back to Smart Slides automatically.
 | `AI_MODEL` | Model id (default `claude-opus-4-8`). |
 | `PORT` | Port (Render sets this). |
 | `AUTH_SECRET` | Signs login tokens. **Required in production.** |
-| `DATA_DIR` | Where the user store is written (default `./.data`). |
+| `DATABASE_URL` | Postgres connection string. Set → Postgres backend; blank → JSON file. |
+| `PGSSL` | `disable` for a local Postgres without SSL (default: SSL on when `DATABASE_URL` is set). |
+| `DATA_DIR` | Where the JSON store is written when `DATABASE_URL` is blank (default `./.data`). |
 | `REELMINT_NO_WATERMARK` | `1` removes the free-tier watermark globally. |
 | `IMAGE_PROVIDER` / `OPENAI_API_KEY` / `IMAGE_MODEL` | OpenAI image generation. |
 | `IMAGE_API_URL` / `IMAGE_API_KEY` | Custom image generator. |
@@ -126,7 +132,7 @@ reelmint/
 │   ├── auth.js      # accounts, tokens, monthly credit tracking
 │   ├── billing.js   # Stripe Checkout + webhook (REST, no SDK)
 │   ├── images.js    # photoreal image providers (+ fallback)
-│   └── store.js     # JSON-file persistence
+│   └── store.js     # persistence — Postgres or JSON file (one async API)
 ├── public/
 │   ├── index.html   # landing + studio + auth modal
 │   ├── styles.css
@@ -140,5 +146,6 @@ reelmint/
 
 - **Video export** uses `MediaRecorder` (`.webm`) — best in Chromium/Edge/Firefox.
 - **Voice input/output** uses the Web Speech API (best in Chrome/Edge).
-- The JSON store is single-instance; for horizontal scaling on Render, move
-  `server/store.js` to Postgres/Redis. Everything else is already production-shaped.
+- With `DATABASE_URL` set the app uses Postgres, so accounts/credits/billing
+  persist across restarts and scale across instances. Without it, it uses a
+  local JSON file (handy for local dev and the zero-config demo).

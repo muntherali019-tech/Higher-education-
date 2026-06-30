@@ -1,5 +1,11 @@
-# Render Blueprint — deploys Reelmint as a single web service.
-# In Render: New → Blueprint → connect this repo → set root directory to "reelmint".
+# Render Blueprint — deploys Reelmint as a web service + a managed Postgres.
+# In Render: New → Blueprint → connect this repo → Apply.
+databases:
+  - name: reelmint-db
+    plan: free
+    databaseName: reelmint
+    user: reelmint
+
 services:
   - type: web
     name: reelmint
@@ -12,6 +18,12 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Durable account/credit storage — auto-filled from the database above.
+      # Remove this block to fall back to the local JSON file instead.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: reelmint-db
+          property: connectionString
       # Paste this in the Render dashboard (secret — not stored in the repo).
       # Without it the app still runs in a built-in demo mode.
       - key: ANTHROPIC_API_KEY
