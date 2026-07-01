@@ -1,7 +1,7 @@
 // Stripe Checkout + webhook handling via the Stripe REST API (no SDK needed).
 // Gracefully no-ops when Stripe env vars are absent.
 import crypto from "node:crypto";
-import { getUserById, getUserByStripeCustomer, saveUser } from "./store.js";
+import { getUserById, getUserByStripeCustomer } from "./store.js";
 import { setPlan } from "./auth.js";
 
 const SECRET = process.env.STRIPE_SECRET_KEY || "";
@@ -69,7 +69,7 @@ function verifySignature(rawBody, header) {
 }
 
 // Process a webhook. `rawBody` must be the unparsed request body (Buffer/string).
-export function handleWebhook(rawBody, sigHeader) {
+export async function handleWebhook(rawBody, sigHeader) {
   if (!verifySignature(rawBody.toString(), sigHeader)) {
     return { ok: false, status: 400, error: "bad signature" };
   }
@@ -81,16 +81,15 @@ export function handleWebhook(rawBody, sigHeader) {
     const obj = event.data.object;
     const userId = obj.client_reference_id || obj.metadata?.userId;
     const plan = obj.metadata?.plan;
-    const user = userId ? getUserById(userId) : null;
+    const user = userId ? await getUserById(userId) : null;
     if (user && plan) {
-      setPlan(user, plan);
       user.stripeCustomer = obj.customer || user.stripeCustomer;
-      saveUser(user);
+      await setPlan(user, plan); // setPlan persists the full user record
     }
   }
   if (event.type === "customer.subscription.deleted") {
-    const user = getUserByStripeCustomer(event.data.object.customer);
-    if (user) setPlan(user, "free");
+    const user = await getUserByStripeCustomer(event.data.object.customer);
+    if (user) await setPlan(user, "free");
   }
   return { ok: true, status: 200 };
 }

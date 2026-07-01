@@ -82,11 +82,11 @@ export function publicUser(user) {
 }
 
 // ---- account ops ----
-export function signup(email, password) {
+export async function signup(email, password) {
   email = String(email || "").trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Invalid email");
   if (String(password || "").length < 6) throw new Error("Password too short (min 6)");
-  if (getUser(email)) throw new Error("Account already exists");
+  if (await getUser(email)) throw new Error("Account already exists");
   const user = {
     id: crypto.randomUUID(),
     email,
@@ -96,27 +96,31 @@ export function signup(email, password) {
     period: currentPeriod(),
     createdAt: Date.now(),
   };
-  saveUser(user);
+  await saveUser(user);
   return { token: makeToken(user.id), user: publicUser(user) };
 }
 
-export function login(email, password) {
-  const user = getUser(email);
+export async function login(email, password) {
+  const user = await getUser(email);
   if (!user || !verifyPassword(password, user.pass)) throw new Error("Wrong email or password");
   return { token: makeToken(user.id), user: publicUser(user) };
 }
 
 // Express middleware — attaches req.user (or null) from the Bearer token.
-export function attachUser(req, _res, next) {
-  const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  const id = verifyToken(token);
-  req.user = id ? getUserById(id) : null;
+export async function attachUser(req, _res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    const id = verifyToken(token);
+    req.user = id ? await getUserById(id) : null;
+  } catch {
+    req.user = null;
+  }
   next();
 }
 
 // Returns { ok } or { ok:false, reason }. Deducts 1 credit when ok.
-export function spendCredit(user) {
+export async function spendCredit(user) {
   if (!user) return { ok: true, anonymous: true };
   ensurePeriod(user);
   const allow = PLAN_CREDITS[user.plan] ?? PLAN_CREDITS.free;
@@ -124,12 +128,20 @@ export function spendCredit(user) {
     return { ok: false, reason: "out_of_credits" };
   }
   user.creditsUsed = (user.creditsUsed || 0) + 1;
-  saveUser(user);
+  await saveUser(user);
   return { ok: true };
 }
 
-export function setPlan(user, plan) {
+// Give back 1 credit (used when a paid action fails after spending).
+export async function refundCredit(user) {
+  if (!user) return;
+  ensurePeriod(user);
+  user.creditsUsed = Math.max(0, (user.creditsUsed || 0) - 1);
+  await saveUser(user);
+}
+
+export async function setPlan(user, plan) {
   if (!user || !PLAN_CREDITS[plan]) return;
   user.plan = plan;
-  saveUser(user);
+  await saveUser(user);
 }
