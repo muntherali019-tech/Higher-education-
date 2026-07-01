@@ -132,6 +132,14 @@ export async function spendCredit(user) {
   return { ok: true };
 }
 
+// Give back 1 credit (used when a paid action fails after spending).
+export async function refundCredit(user) {
+  if (!user) return;
+  ensurePeriod(user);
+  user.creditsUsed = Math.max(0, (user.creditsUsed || 0) - 1);
+  await saveUser(user);
+}
+
 export async function setPlan(user, plan) {
   if (!user || !PLAN_CREDITS[plan]) return;
   user.plan = plan;

@@ -15,6 +15,7 @@ import {
   attachUser,
   publicUser,
   spendCredit,
+  refundCredit,
 } from "./auth.js";
 import { stripeEnabled, createCheckout, handleWebhook } from "./billing.js";
 import { generateImage, imageProvider } from "./images.js";
@@ -24,6 +25,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 
 const app = express();
+// Behind Render's proxy — trust it so req.protocol is https (used in checkout URLs).
+app.set("trust proxy", 1);
+
+// Wrap async handlers so a rejected promise becomes a clean 500 instead of a
+// hung request (Express 4 does not catch async errors on its own).
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // Stripe webhook needs the RAW body — mount it before the JSON parser.
 app.post(
@@ -95,7 +102,7 @@ app.post("/api/billing/checkout", async (req, res) => {
 });
 
 // ---------- storyboard / video script (costs 1 credit) ----------
-app.post("/api/script", async (req, res) => {
+app.post("/api/script", wrap(async (req, res) => {
   const {
     topic = "",
     platform = "tiktok",
@@ -123,23 +130,32 @@ app.post("/api/script", async (req, res) => {
   "description": string
 }`;
 
-  const data = await generateJSON({
-    system,
-    content: `Topic: ${topic}
+  let data;
+  try {
+    data = await generateJSON({
+      system,
+      content: `Topic: ${topic}
 Platform: ${platform}
 Tone: ${tone}
 Target length: ${durationSec}s (${format})
 Make exactly ${sceneCount} scenes.
 ${schema}`,
-    maxTokens: 3000,
-    demo: demoStoryboard(topic, sceneCount),
-  });
+      maxTokens: 3000,
+      demo: demoStoryboard(topic, sceneCount),
+    });
+  } catch (e) {
+    // Generation failed after the credit was spent — refund it.
+    await refundCredit(req.user);
+    return res
+      .status(502)
+      .json({ error: "generation_failed", user: publicUser(req.user) });
+  }
 
   res.json({ ...decorateStoryboard(data), user: publicUser(req.user) });
-});
+}));
 
 // ---------- AI editor assistant (voice or text instructions) ----------
-app.post("/api/assistant", async (req, res) => {
+app.post("/api/assistant", wrap(async (req, res) => {
   const { instruction = "", storyboard = null } = req.body || {};
   if (!instruction.trim())
     return res.status(400).json({ error: "instruction is required" });
@@ -167,10 +183,10 @@ Return JSON: { "reply": string, "storyboard": { "title": string, "hook": string,
 
   if (data.storyboard) data.storyboard = decorateStoryboard(data.storyboard);
   res.json(data);
-});
+}));
 
 // ---------- picture / poster ----------
-app.post("/api/image", async (req, res) => {
+app.post("/api/image", wrap(async (req, res) => {
   const { prompt = "", style = "bold" } = req.body || {};
   if (!prompt.trim()) return res.status(400).json({ error: "prompt is required" });
 
@@ -196,7 +212,7 @@ Return JSON: { "headline": string, "subline": string, "palette": {"bg": string, 
     },
   });
   res.json({ type: "design", design });
-});
+}));
 
 // ---------- scan & upload (vision) ----------
 app.post("/api/scan", async (req, res) => {
@@ -215,7 +231,7 @@ app.post("/api/scan", async (req, res) => {
 });
 
 // ---------- repurpose long-form into clips ----------
-app.post("/api/repurpose", async (req, res) => {
+app.post("/api/repurpose", wrap(async (req, res) => {
   const { transcript = "", count = 4 } = req.body || {};
   if (!transcript.trim())
     return res.status(400).json({ error: "transcript is required" });
@@ -230,10 +246,10 @@ Return JSON: { "clips": [{ "title": string, "hook": string, "quote": string, "ha
     demo: { clips: [{ title: "Demo clip", hook: "Add your API key", quote: transcript.slice(0, 80), hashtags: ["#reelmint"] }] },
   });
   res.json(data);
-});
+}));
 
 // ---------- copy / captions ----------
-app.post("/api/captions", async (req, res) => {
+app.post("/api/captions", wrap(async (req, res) => {
   const { topic = "", platform = "instagram", count = 6 } = req.body || {};
   if (!topic.trim()) return res.status(400).json({ error: "topic is required" });
   const text = await generateText({
@@ -243,10 +259,18 @@ app.post("/api/captions", async (req, res) => {
     maxTokens: 1200,
   });
   res.json({ text });
-});
+}));
 
 // SPA fallback.
 app.get("*", (_req, res) => res.sendFile(path.join(PUBLIC_DIR, "index.html")));
+
+// Global error handler — anything a wrapped route throws lands here.
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err?.message || err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: "server_error" });
+});
 
 const PLANS = [
   {
