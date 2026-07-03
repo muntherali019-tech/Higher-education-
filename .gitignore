@@ -11,3 +11,4 @@ dist-app
 dist-onefile
 server/data
 .env.local
+*.zip
