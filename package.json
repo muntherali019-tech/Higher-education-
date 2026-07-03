@@ -1,0 +1,46 @@
+{
+  "name": "whisker-academy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Education Academy \u2014 a cat-themed learning game for UK KS1\u2013KS3 and Higher Education, with AI homework marking and a scan-and-solve helper.",
+  "scripts": {
+    "dev": "vite --mode web",
+    "dev:app": "vite --mode app",
+    "server": "node server/index.js",
+    "start": "concurrently -k -n web,api -c green,cyan \"vite --mode web\" \"node server/index.js\"",
+    "build": "vite build --mode web",
+    "build:web": "vite build --mode web",
+    "build:app": "vite build --mode app",
+    "build:onefile": "vite build --mode onefile",
+    "preview": "vite preview --outDir dist-web",
+    "cap:add": "cap add android",
+    "cap:sync": "npm run build:app && cap sync",
+    "cap:open": "cap open android"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "lucide-react": "^0.383.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "vite": "^5.3.0",
+    "vite-plugin-singlefile": "^2.0.1"
+  },
+  "optionalDependencies": {
+    "pg": "^8.12.0",
+    "@capacitor/local-notifications": "^6.1.0"
+  },
+  "overrides": {
+    "tar": "^7.5.16",
+    "esbuild": "^0.25.0"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules
+dist
+.env
+android
+ios
+.DS_Store
+*.log
+.vite
+dist-web
+dist-app
+dist-onefile
+server/data
+.env.local
