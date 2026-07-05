@@ -398,6 +398,9 @@ export default function App() {
   useEffect(() => {
     try { document.documentElement.dir = rtl ? "rtl" : "ltr"; document.documentElement.lang = String(voiceLang || "en").split("-")[0]; } catch {}
   }, [voiceLang, rtl]);
+  // First-launch onboarding flag. Declared before the effects below that list `onboard`
+  // in their deps — otherwise it is read in the temporal dead zone and every render throws.
+  const [onboard, setOnboard] = useState(() => { try { return localStorage.getItem("whisker.onboarded") !== "1"; } catch { return false; } });
   useEffect(() => {
     if (screen === "home" && guideOn && !onboard && !greetedRef.current) {
       greetedRef.current = true;
@@ -474,7 +477,6 @@ export default function App() {
     return () => { alive = false; };
   }, []);
   // First-launch language chooser so new users worldwide start in their own language.
-  const [onboard, setOnboard] = useState(() => { try { return localStorage.getItem("whisker.onboarded") !== "1"; } catch { return false; } });
   const detectedLang = LANGUAGES.find((l) => String((typeof navigator !== "undefined" && navigator.language) || "").toLowerCase().startsWith(l.id));
   function pickOnboardLang(code) { try { localStorage.setItem("whisker.onboarded", "1"); } catch {} if (code) setVoiceLang(code); setOnboard(false); }
   const billingNote = billing.mode() === "stripe"
