@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Education Academy \u2014 a cat-themed learning game for UK KS1\u2013KS3 and Higher Education, with AI homework marking and a scan-and-solve helper.",
+  "description": "Education Academy — a cat-themed learning game for UK KS1–KS3 and Higher Education, with AI homework marking and a scan-and-solve helper.",
   "scripts": {
     "dev": "vite --mode web",
     "dev:app": "vite --mode app",
@@ -14,6 +14,7 @@
     "build:app": "vite build --mode app",
     "build:onefile": "vite build --mode onefile",
     "preview": "vite preview --outDir dist-web",
+    "test": "node --test",
     "cap:add": "cap add android",
     "cap:sync": "npm run build:app && cap sync",
     "cap:open": "cap open android"
@@ -36,8 +37,8 @@
     "vite-plugin-singlefile": "^2.3.3"
   },
   "optionalDependencies": {
-    "pg": "^8.12.0",
-    "@capacitor/local-notifications": "^6.1.0"
+    "@capacitor/local-notifications": "^6.1.0",
+    "pg": "^8.12.0"
   },
   "overrides": {
     "tar": "^7.5.16",
