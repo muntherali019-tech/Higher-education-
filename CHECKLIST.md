@@ -67,8 +67,8 @@ A simple list of what's **already built** and the **steps left for you**. Tick t
 - [ ] Set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, `EMAIL_FROM`, `WEEKLY_EMAILS_INPROCESS=1`
 
 ### 5. Fill in the legal pages
-- [ ] Edit `marketing/terms.html` and `marketing/support.html` — replace every **[bracketed]** bit (your name, contact email, country)
-- [ ] Have someone review them before taking live payments
+- [x] `marketing/privacy.html`, `terms.html` and `support.html` filled in (provider "Education Academy", contact muntherali019@gmail.com, England & Wales) — no bracketed placeholders remain
+- [ ] Have a qualified person review them before taking live payments (add a postal address in the privacy policy if your jurisdiction requires one)
 
 ### 6. Build the Android app (when ready)
 - [ ] `npm install` then `npm run build:app`
@@ -91,6 +91,6 @@ A simple list of what's **already built** and the **steps left for you**. Tick t
 - Translations and legal pages are **AI/templates** — review before launch.
 - **Reminders** and **Play Billing** only work on the **installed app** (after the optional `npm install` packages). On the website, reminders are not used and payments go through Stripe.
 - The data store is single-instance; for very large scale, keep `DATABASE_URL` set and run one instance (or move to a managed multi-instance DB).
-- "Share/Invite" uses the real share sheet; a true **referral reward** (bonus for both people) would need extra backend work.
+- "Share/Invite" uses the real share sheet, and the **referral reward** (bonus stars for both the inviter and the new friend) is implemented server-side — it is granted once the invited account completes its first round.
 
 You're in great shape — most of the heavy lifting is done. 🐱
