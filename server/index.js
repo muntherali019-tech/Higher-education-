@@ -31,10 +31,15 @@ const DEFAULT_STATE = () => ({ subs: { junior: false, adult: false }, stars: 0, 
 app.get("/api/health", (_req, res) => res.json({ ok: true, hasKey: Boolean(KEY) }));
 
 /* ---------- AI proxy (keeps the API key server-side) ---------- */
+// Default model + the set the client is allowed to request. Keeping an allow-list
+// means a compromised client can't point our key at an arbitrary/expensive model.
+const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+const ALLOWED_MODELS = new Set(["claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5-20251001"]);
 app.post("/api/claude", async (req, res) => {
   if (!KEY) return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY. Copy .env.example to .env and add your key." });
   try {
-    const { system, content, max_tokens = 1500, model = "claude-sonnet-4-6" } = req.body || {};
+    const { system, content, max_tokens = 1500 } = req.body || {};
+    const model = ALLOWED_MODELS.has(req.body?.model) ? req.body.model : DEFAULT_MODEL;
     const upstream = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": KEY, "anthropic-version": "2023-06-01" },
@@ -434,7 +439,9 @@ app.post("/api/admin/report", async (req, res) => {
 /* ---------- Stripe (web build payments) ---------- */
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
-const STRIPE_PRICES = { junior: process.env.STRIPE_PRICE_JUNIOR || "", adult: process.env.STRIPE_PRICE_ADULT || "" };
+const STRIPE_PRICES = { junior: process.env.STRIPE_PRICE_JUNIOR || "", adult: process.env.STRIPE_PRICE_ADULT || "", family: process.env.STRIPE_PRICE_FAMILY || "" };
+// One-time prices for gifting a month (mode:payment). Optional — set to enable web gifting.
+const STRIPE_GIFT_PRICES = { junior: process.env.STRIPE_GIFT_PRICE_JUNIOR || "", adult: process.env.STRIPE_GIFT_PRICE_ADULT || "", family: process.env.STRIPE_GIFT_PRICE_FAMILY || "" };
 const SITE_URL = process.env.PUBLIC_WEB_URL || "http://localhost:5173";
 
 async function stripeForm(path, params) {
@@ -494,9 +501,15 @@ function verifyStripeSig(rawBuf, sigHeader) {
 }
 const userById = (db, uid) => (uid && db.users[uid]) ? db.users[uid] : null;
 const userByCustomer = (db, customer) => Object.values(db.users).find((u) => u.stripeCustomerId === customer) || null;
-function setUserPlan(user, plan, on) { user.subs = user.subs || { junior: false, adult: false }; if (plan === "junior" || plan === "adult") user.subs[plan] = !!on; }
+function setUserPlan(user, plan, on) {
+  user.subs = user.subs || { junior: false, adult: false };
+  if (plan === "junior" || plan === "adult") user.subs[plan] = !!on;
+  // Family entitles both Junior and Adult access.
+  if (plan === "family") { user.subs.family = !!on; user.subs.junior = !!on; user.subs.adult = !!on; }
+}
 function planFromSubscription(sub) {
   const priceId = sub?.items?.data?.[0]?.price?.id;
+  if (priceId && priceId === STRIPE_PRICES.family) return "family";
   if (priceId && priceId === STRIPE_PRICES.adult) return "adult";
   if (priceId && priceId === STRIPE_PRICES.junior) return "junior";
   return undefined;
@@ -506,7 +519,12 @@ function handleStripeEvent(rawBuf, sig, res) {
   let event; try { event = JSON.parse(rawBuf.toString("utf8")); } catch { return res.status(400).json({ error: "Bad payload." }); }
   const db = load(); const obj = event?.data?.object || {};
   try {
-    if (event.type === "checkout.session.completed") {
+    if (event.type === "checkout.session.completed" && obj.metadata?.gift === "1") {
+      // A one-time gift purchase completed — mint a redeemable code tied to this session.
+      const g = mintGift(db, obj.metadata?.plan || "junior", 1, obj.id);
+      save(db);
+      console.log("gift minted:", g.code, "for", obj.id);
+    } else if (event.type === "checkout.session.completed") {
       const user = userById(db, obj.client_reference_id || obj.metadata?.uid);
       if (user) { if (obj.customer) user.stripeCustomerId = obj.customer; if (obj.subscription) user.stripeSubId = obj.subscription; setUserPlan(user, obj.metadata?.plan, true); save(db); }
     } else if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
@@ -520,6 +538,65 @@ function handleStripeEvent(rawBuf, sig, res) {
   } catch (e) { /* never fail the webhook on a store hiccup; Stripe will retry */ }
   res.json({ received: true });
 }
+
+/* ---------- Gift subscriptions (one-time purchase -> redeemable code) ---------- */
+const GIFT_PLANS = new Set(["junior", "adult", "family"]);
+function mintGift(db, plan, months, sessionId) {
+  const code = "GIFT-" + crypto.randomBytes(4).toString("hex").toUpperCase(); // e.g. GIFT-1A2B3C4D
+  const gift = { code, plan: GIFT_PLANS.has(plan) ? plan : "junior", months: months || 1, sessionId: sessionId || null, createdAt: Date.now(), redeemedBy: null, redeemedAt: null };
+  db.gifts[code] = gift;
+  return gift;
+}
+
+// Start a one-time Stripe Checkout for a gift. Webhook mints the code on completion.
+app.post("/api/gift/checkout", async (req, res) => {
+  if (!STRIPE_SECRET) return res.status(503).json({ error: "Stripe isn't configured on the server yet." });
+  const plan = req.body?.plan; const price = STRIPE_GIFT_PRICES[plan];
+  if (!GIFT_PLANS.has(plan) || !price) return res.status(400).json({ error: "Set STRIPE_GIFT_PRICE_* to enable gifting this plan." });
+  try {
+    const session = await stripeForm("checkout/sessions", {
+      mode: "payment",
+      "line_items[0][price]": price,
+      "line_items[0][quantity]": "1",
+      success_url: SITE_URL + "/?gift=success&session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: SITE_URL + "/?gift=cancel",
+      "metadata[gift]": "1",
+      "metadata[plan]": plan,
+    });
+    res.json({ url: session.url });
+  } catch (e) { res.status(502).json({ error: String(e.message || e) }); }
+});
+
+// Retrieve the minted gift code after returning from Stripe checkout.
+app.get("/api/gift/code", (req, res) => {
+  const db = load();
+  const gift = Object.values(db.gifts).find((g) => g.sessionId === req.query.session_id);
+  res.json({ code: gift?.code || null });
+});
+
+// Dev/mock: mint a gift code without payment (used when billing is in mock mode).
+app.post("/api/gift/mock-create", (req, res) => {
+  const plan = req.body?.plan;
+  if (!GIFT_PLANS.has(plan)) return res.status(400).json({ error: "Unknown plan." });
+  const db = load();
+  const g = mintGift(db, plan, 1, null);
+  save(db);
+  res.json({ code: g.code, plan: g.plan });
+});
+
+// Redeem a gift code on the signed-in account: grants the plan for months*30 days.
+app.post("/api/gift/redeem", auth((req, res, db, user) => {
+  const code = String(req.body?.code || "").trim().toUpperCase();
+  const gift = db.gifts[code];
+  if (!gift) return res.status(404).json({ error: "That code isn't valid." });
+  if (gift.redeemedBy) return res.status(409).json({ error: "That gift has already been redeemed." });
+  gift.redeemedBy = user.id; gift.redeemedAt = Date.now();
+  setUserPlan(user, gift.plan, true);
+  const extend = gift.months * 30 * 86400000;
+  user.giftExpiry = Math.max(user.giftExpiry || 0, Date.now()) + extend;
+  save(db);
+  res.json({ ok: true, plan: gift.plan, months: gift.months });
+}));
 
 /* ---------- Public legal & marketing pages (clean URLs, before the SPA fallback) ---------- */
 const MKT = path.join(ROOT, "marketing");

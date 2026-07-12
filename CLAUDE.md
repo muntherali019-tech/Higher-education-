@@ -67,8 +67,16 @@ Browser (React)  ──POST /api/claude──►  Express server  ──x-api-ke
 
 The **Anthropic API key never reaches the browser.** All AI calls go through
 `src/lib/api.js`, which POSTs to the backend (`/api/claude`), which forwards to
-Anthropic with the server-side key. The default model is set in `server/index.js`
-(`claude-sonnet-4-6`) — change it there, not in the client.
+Anthropic with the server-side key.
+
+**Model tiers.** The client picks the best model per task via `MODELS` in
+`src/lib/api.js`: `REASONING` (`claude-opus-4-8`) for homework marking and
+scan-and-solve, `SMART` (`claude-sonnet-5`, the default) for question/lesson/exam
+generation and tutor chat, and `FAST` (`claude-haiku-4-5`) for tiny
+routing/translation calls. The server (`server/index.js`) enforces an
+**allow-list** (`ALLOWED_MODELS`) and falls back to `DEFAULT_MODEL`
+(`ANTHROPIC_MODEL` env, default `claude-sonnet-5`) — so change model choices in
+those two places, never hard-code an id elsewhere.
 
 `src/lib/api.js` reads `import.meta.env.VITE_API_BASE` (falling back to `/api`),
 so a production mobile build points at a deployed backend URL. In dev, Vite proxies
@@ -103,16 +111,20 @@ src/
     Courses.jsx            vocational exam-prep courses screen
     Languages.jsx          AI language-teacher screen (lessons, quiz, listening, speaking)
     GrownUps.jsx           parent/teacher portal (auth, children, classes, goals, reports)
+    Worksheet.jsx          printable AI worksheet generator (premium revenue tool)
+    Gift.jsx               gift-a-subscription screen (buy → redeemable code)
     ErrorBoundary.jsx      top-level crash guard -> friendly recoverable screen
   data/                    static content (no logic)
-    curriculum.js          stages, subjects, topics, plans, and per-stage tutor prompts (tutorBrief)
+    curriculum.js          stages, subjects, topics, PLANS (incl. Family), grantPlan(), per-stage tutor prompts (tutorBrief)
     bank.js                offline fallback quiz questions
     courses.js             vocational course + module definitions
     languages.js           taught languages (BCP-47 codes, rtl flag) + fallback phrases
+    demo.js                realistic sample learner + curated sample round for the live demo (not lorem)
   lib/                     client logic, one concern per file
-    api.js                 ALL Anthropic calls (generateQuestions, markHomework, solveQuestion, askTutor, courseLesson, ...)
+    api.js                 ALL Anthropic calls + MODELS tiers (generateQuestions, markHomework, solveQuestion, askTutor, generateWorksheet, ...)
     progress.js            localStorage state, stats, streaks, daily goal (state key "whisker.v1")
-    billing.js             purchases (Stripe / RevenueCat / mock)
+    billing.js             purchases + gift codes (Stripe / RevenueCat / mock)
+    printable.js           self-contained printable certificate + worksheet (hidden-iframe print)
     platform.js            web-vs-app build detection
     cloud.js               cross-device sync against the backend
     i18n.js                whole-app localisation (batched AI translation, cached on device)
@@ -169,6 +181,33 @@ reelmint/                  SEPARATE project — see below
 - **Auth pattern:** wrap protected routes in the `auth(handler)` helper in
   `server/index.js`; it resolves the bearer token to a user and 401s otherwise.
   `pub(user)` is the only shape sent to the client (never leak `salt`/`hash`).
+
+## Monetisation & premium features
+
+Revenue paths, all built on the existing billing/Stripe plumbing:
+
+- **Plans** live in `PLANS` (`src/data/curriculum.js`): **Junior** (£3, KS1–2),
+  **Adult** (£5, KS3 & HE), and **Family** (£8, everything for up to 4 learners).
+  Family is a bundle — `grantPlan(subs, "family")` also sets `junior` + `adult`,
+  and the server's `setUserPlan`/`planFromSubscription` mirror that. Add a new
+  tier by extending `PLANS`, `billing.js` (`PRODUCT_IDS`/`ENTITLEMENTS`), the
+  Stripe price map, and `grantPlan`.
+- **Gift subscriptions** (`src/components/Gift.jsx`, `billing.giftCheckout`/
+  `redeemGift`): mock mode mints a code instantly; the web build runs a one-time
+  Stripe Checkout (`/api/gift/checkout`) and the webhook mints a `GIFT-XXXX` code
+  stored in `db.gifts`. Codes are redeemed in Settings (`/api/gift/redeem`), which
+  grants the plan for 30 days.
+- **Printable certificates & worksheets** (`src/lib/printable.js`,
+  `src/components/Worksheet.jsx`): self-contained print/PDF via a hidden iframe —
+  no layout coupling. Worksheets are AI-generated (`api.generateWorksheet`) and
+  deep-link from each "needs practice" topic on the dashboard.
+- **Live demo** (`src/data/demo.js`): `demoState()` fills the dashboard with a
+  believable sample learner (loads only when empty, cleared by "Reset progress");
+  `DEMO_ROUND` is a curated, offline "try a free sample round" on the home screen.
+
+When adding a paid surface, gate it on `state.subs[...]`/`trial.trialActive()`,
+keep the Stripe/Play split in `billing.js`, and never trust the client for
+entitlement — the server webhook is the source of truth.
 
 ## Configuration & environment
 

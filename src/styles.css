@@ -368,3 +368,87 @@ select.tin{appearance:none;-webkit-appearance:none}
 .lrank{font-weight:800;font-size:18px;min-width:26px;text-align:center}
 .lname{flex:1;font-weight:800;font-family:'Nunito'}
 .lstars{font-weight:800;color:#b9852b;display:inline-flex;align-items:center;gap:4px}
+
+/* ============================================================
+   Premium polish — screen transitions, micro-interactions,
+   skeleton loaders, plan ribbon, and print styles.
+   All motion is disabled by the global prefers-reduced-motion
+   guard above, so these are safe by default.
+   ============================================================ */
+
+/* Each screen fades + rises in as it mounts (screens swap the <main>). */
+@keyframes screenIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+main{animation:screenIn .34s cubic-bezier(.22,.61,.36,1) both}
+
+/* Gentle entrance for cards and pick tiles. */
+@keyframes riseIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.card,.plan,.pick,.badge,.shopitem{animation:riseIn .3s ease both}
+
+/* Desktop hover lift (never fires on touch, never fights :active). */
+@media (hover:hover){
+  .pick,.toolcard,.qbtn,.topic{transition:transform .14s ease,box-shadow .14s ease}
+  .pick:hover,.toolcard:hover,.qbtn:hover,.topic:hover{transform:translateY(-2px)}
+  .bigbtn:hover:not(:disabled){filter:brightness(1.03)}
+  .planbtn:hover:not(:disabled),.shopbtn:hover:not(:disabled){filter:brightness(1.05)}
+}
+
+/* Attention on the "try a sample round" demo CTA. */
+@keyframes demoGlow{0%,100%{box-shadow:0 8px 22px rgba(77,166,255,.16)}50%{box-shadow:0 10px 30px rgba(77,166,255,.34)}}
+.demoCta{border-color:#cfe6ff;animation:riseIn .3s ease both,demoGlow 2.6s ease-in-out 1.2s infinite}
+
+/* Skeleton shimmer for loading states. */
+.skeleton{position:relative;overflow:hidden;background:#f1e7da;border-radius:12px}
+.skeleton::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);animation:shimmer 1.25s infinite}
+@keyframes shimmer{100%{transform:translateX(100%)}}
+.skl-line{height:12px;margin:8px 0}
+.skl-line.w70{width:70%} .skl-line.w40{width:40%} .skl-line.w90{width:90%}
+
+/* "Best value" ribbon on a highlighted plan (Family). */
+.plan{position:relative}
+.plan.best{outline:3px solid #FFC83D;outline-offset:2px}
+.plan .ribbon{position:absolute;top:12px;right:-4px;background:#FFC83D;color:#5a431a;font-family:'Nunito';font-weight:800;
+  font-size:11.5px;padding:4px 12px;border-radius:8px 0 0 8px;box-shadow:0 3px 8px rgba(0,0,0,.12)}
+
+/* Premium tool cards for certificate / worksheet / gift (dashboard). */
+.premrow{display:grid;gap:10px;margin-top:10px}
+.premcard{display:flex;gap:12px;align-items:center;width:100%;text-align:left;cursor:pointer;
+  border:2px solid #eadfce;background:#fff;border-radius:18px;padding:13px 15px;font-family:'Nunito'}
+.premcard .pemoji{font-size:26px;flex:none;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--sky-soft)}
+.premcard .ptitle{font-family:'Fredoka';font-weight:600;font-size:17px;line-height:1.1}
+.premcard .psub{font-weight:700;color:var(--muted);font-size:12.5px;margin-top:2px}
+.premcard:disabled{opacity:.55;cursor:default}
+
+/* Printable certificate. */
+.cert{background:linear-gradient(135deg,#FFFDF6,#FFF3DC);border:6px double var(--ginger);border-radius:18px;
+  padding:34px 28px;text-align:center;color:var(--ink);max-width:640px;margin:12px auto}
+.cert .seal{font-size:52px;line-height:1}
+.cert h2{font-family:'Fredoka';font-size:30px;margin:10px 0 2px}
+.cert .who{font-family:'Fredoka';font-size:26px;color:var(--purple-deep);margin:14px 0 4px}
+.cert .stats{display:flex;justify-content:center;gap:22px;flex-wrap:wrap;margin:16px 0 4px;font-weight:800}
+.cert .stats b{display:block;font-size:22px;color:var(--ginger-deep)}
+.cert .sig{margin-top:22px;font-weight:800;color:var(--muted);font-size:13px}
+
+/* Worksheet (printable). */
+.ws{background:#fff;border:2px solid #eadfce;border-radius:16px;padding:20px;margin:12px auto;max-width:640px;color:var(--ink)}
+.ws h3{font-family:'Fredoka';margin:0 0 4px}
+.ws ol{padding-left:22px} .ws li{margin:10px 0;font-weight:700}
+.ws .ans{color:var(--muted);font-weight:800;font-size:13px;margin-top:10px}
+
+/* Worksheet generator controls. */
+.wsl{display:flex;align-items:center;justify-content:space-between;gap:12px;font-weight:800;font-family:'Nunito';font-size:14px;margin:8px 0}
+.wsel{font-family:'Nunito';font-weight:700;font-size:14px;padding:9px 12px;border-radius:12px;border:2px solid #eadfce;background:#fff;min-width:150px}
+
+/* Gift code display + redeem row. */
+.giftcode{display:inline-flex;align-items:center;gap:8px;margin:10px auto 0;font-family:'Fredoka';font-weight:700;font-size:20px;letter-spacing:1px;
+  background:#FFF7EC;border:2px dashed var(--ginger);border-radius:12px;padding:10px 16px;color:var(--ink);cursor:pointer}
+.giftredeem{display:flex;gap:8px;align-items:center;margin-top:8px}
+.giftredeem .chatinput{flex:1;letter-spacing:1px;text-transform:uppercase}
+
+/* Print: show only the printable node, clean and inkfriendly. */
+@media print{
+  body{background:#fff}
+  .topbar,.iconbtn,.bigbtn,.micfab,.guidebubble,.consent,.offlinebar{display:none !important}
+  .no-print{display:none !important}
+  .printable{box-shadow:none;border-color:#ccc}
+}

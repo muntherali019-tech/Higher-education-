@@ -11,7 +11,7 @@ import crypto from "crypto";
 
 const DIR = path.join(process.cwd(), "server", "data");
 const FILE = path.join(DIR, "db.json");
-const EMPTY = { users: {}, children: {}, classes: {}, goals: {} };
+const EMPTY = { users: {}, children: {}, classes: {}, goals: {}, gifts: {} };
 
 let cache = null;       // in-memory copy of the whole dataset
 let backend = "file";   // "file" | "pg"

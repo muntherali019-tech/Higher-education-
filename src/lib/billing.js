@@ -13,9 +13,9 @@ const PKG = "@revenuecat/purchases-capacitor";
 const API = import.meta.env.VITE_API_BASE || "/api";
 
 // Play / App Store product IDs (create these in the Play Console / App Store Connect).
-export const PRODUCT_IDS = { junior: "whisker_junior_monthly", adult: "whisker_adult_monthly" };
+export const PRODUCT_IDS = { junior: "whisker_junior_monthly", adult: "whisker_adult_monthly", family: "whisker_family_monthly" };
 // RevenueCat entitlement identifiers.
-export const ENTITLEMENTS = { junior: "junior", adult: "adult" };
+export const ENTITLEMENTS = { junior: "junior", adult: "adult", family: "family" };
 
 export function mode() { return isMock ? "mock" : provider; }            // "mock" | "play" | "stripe"
 export function isLive() { return !isMock; }
@@ -34,7 +34,8 @@ export async function configure() {
 
 function activeFromInfo(info) {
   const active = info?.customerInfo?.entitlements?.active || info?.entitlements?.active || {};
-  return { junior: !!active[ENTITLEMENTS.junior], adult: !!active[ENTITLEMENTS.adult] };
+  const family = !!active[ENTITLEMENTS.family];
+  return { junior: family || !!active[ENTITLEMENTS.junior], adult: family || !!active[ENTITLEMENTS.adult], family };
 }
 
 // { junior, adult } or null when unknown (mock, or web where entitlement lives on the account).
@@ -85,9 +86,40 @@ export async function getPrices() {
     const pkgs = offerings?.current?.availablePackages || [];
     const find = (id) => pkgs.find((p) => (p.product?.identifier || p.identifier) === id)?.product;
     const out = {};
-    for (const plan of ["junior", "adult"]) { const prod = find(PRODUCT_IDS[plan]); if (prod?.priceString) out[plan] = prod.priceString; }
+    for (const plan of ["junior", "adult", "family"]) { const prod = find(PRODUCT_IDS[plan]); if (prod?.priceString) out[plan] = prod.priceString; }
     return Object.keys(out).length ? out : null;
   } catch { return null; }
+}
+
+/* ---------------- Gift subscriptions ---------------- */
+// Buy a gift: in mock/dev this mints a code immediately; on the web build it
+// starts a one-time Stripe Checkout, and the webhook mints the code (retrieved
+// on return via getGiftCode). Returns { code } or { redirect:true }.
+export async function giftCheckout(plan) {
+  if (isMock) {
+    const r = await fetch(`${API}/gift/mock-create`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ plan }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.code) throw new Error(j.error || "Couldn't create the gift.");
+    return { code: j.code };
+  }
+  const r = await fetch(`${API}/gift/checkout`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ plan }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.url) throw new Error(j.error || "Couldn't start gift checkout.");
+  window.location.assign(j.url);
+  return { redirect: true };
+}
+// After returning from Stripe gift checkout, fetch the minted code for the session.
+export async function getGiftCode(sessionId) {
+  const r = await fetch(`${API}/gift/code?session_id=${encodeURIComponent(sessionId)}`);
+  const j = await r.json().catch(() => ({}));
+  return r.ok ? j.code || null : null;
+}
+// Redeem a gift code on the signed-in account. Returns { plan, months } on success.
+export async function redeemGift(code) {
+  const r = await fetch(`${API}/gift/redeem`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ code }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.error || "That code isn't valid or has already been used.");
+  return j;
 }
 
 // Open the right place to manage/cancel a subscription. Play deep link (app) or Stripe portal (web).

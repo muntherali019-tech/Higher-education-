@@ -63,6 +63,15 @@ export const STRINGS = [
   "Ask a grown-up to connect this device to your family or class to join the leaderboard.", "No scores yet this week — be the first!",
   "🎁 +{n} bonus stars from a friend!", "We'll both get bonus stars.",
   "Streak freeze", "Saves your streak if you miss a day", "You have {n}", "🎁 +{n} bonus stars — thanks for joining!",
+  "Try a free sample round", "Five real questions — no sign-up needed",
+  "Family", "All stages · up to 4 learners", "Everything in Junior & Adult", "Add more children in the portal", "Best value",
+  "Certificate of achievement", "Print or save a certificate of {name}'s progress", "Download certificate", "Print",
+  "Practice worksheet", "Make a printable worksheet", "Creating your worksheet…", "Download worksheet", "Answers",
+  "Gift a subscription", "Give a month of Mochi to a friend or family", "Gift Junior", "Gift Adult", "Gift Family",
+  "Your gift code", "Send this code to whoever you're gifting. They redeem it in Settings.", "Redeem a gift code",
+  "Enter your gift code", "Redeem", "🎉 Gift unlocked! Enjoy learning with Mochi.", "That code isn't valid or has already been used.",
+  "Stage", "Subject", "Topic", "Questions", "Create worksheet", "Make another", "Couldn't make the worksheet just now — please try again.",
+  "Couldn't create the gift.", "Gift {name}", "Best value", "Rewards & extras",
 ];
 
 const NAME = Object.fromEntries(LANGUAGES.map((l) => [l.id, l.name]));
