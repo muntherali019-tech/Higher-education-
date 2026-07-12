@@ -64,8 +64,19 @@ export const PLANS = {
     name: "Adult", price: "£5", covers: "Key Stage 3 & Higher Education", color: "var(--purple)",
     features: ["Everything in Junior", "KS3 maths, English & science", "University-level study help", "Step-by-step worked solutions"],
   },
+  // Family bundles Junior + Adult for one household. "best" highlights it on the plans screen.
+  family: {
+    name: "Family", price: "£8", covers: "All stages · up to 4 learners", color: "var(--sky)", best: true,
+    features: ["Everything in Junior & Adult", "KS1–KS3 + Higher Education", "Up to 4 learner profiles", "Priority homework marking"],
+  },
 };
 export const planForKs = (ks) => KS_META.find((k) => k.id === ks)?.plan;
+// Family entitles both Junior and Adult access; expand it wherever access is checked.
+export const grantPlan = (subs = {}, plan) => {
+  const next = { ...subs, [plan]: true };
+  if (plan === "family") { next.junior = true; next.adult = true; }
+  return next;
+};
 
 // ---- Tutor "models": one brief per stage, tuned to the England / UK curriculum ----
 export function tutorBrief(ks, subject) {

@@ -11,11 +11,18 @@ export function extractJSON(text) {
   return JSON.parse(t);
 }
 
-async function call({ system, content, max_tokens = 1500 }) {
+// Model tiers — pick the strongest model per task, not a one-size default.
+//   REASONING: image marking / scan-and-solve, where accuracy matters most.
+//   SMART:     question generation, lessons, exams — high quality, fast.
+//   FAST:      tiny routing/translation calls where latency wins.
+// The server enforces an allow-list, so these names must match ALLOWED_MODELS there.
+export const MODELS = { REASONING: "claude-opus-4-8", SMART: "claude-sonnet-5", FAST: "claude-haiku-4-5-20251001" };
+
+async function call({ system, content, max_tokens = 1500, model = MODELS.SMART }) {
   const res = await fetch(`${BASE}/claude`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system, content, max_tokens }),
+    body: JSON.stringify({ system, content, max_tokens, model }),
   });
   if (!res.ok) throw new Error(`API ${res.status}`);
   const data = await res.json();
@@ -44,7 +51,7 @@ export async function generateQuestions({ ks, subject, topic, count = 15, langua
     : "";
   const system =
     tutorBrief(ks, subject) +
-    ` Create exactly ${count} multiple-choice questions on the given topic. Each has 4 short answer choices with exactly one correct; vary the position of the correct answer across questions.` +
+    ` Create exactly ${count} multiple-choice questions on the given topic. Rules for quality: each question has exactly one unambiguous correct answer; the three distractors must be plausible common mistakes (not obviously silly), all four choices similar in length and format; no two questions should test the identical fact; progress from easier to harder; the explanation must justify why the correct answer is right (not just restate it). Vary the position of the correct answer across questions.` +
     langClause +
     ` Reply with ONLY raw JSON, no markdown:` +
     ' {"questions":[{"question":"...","choices":["a","b","c","d"],"answerIndex":0,"explanation":"one short sentence"}]}';
@@ -64,12 +71,13 @@ export async function markHomework({ ks, subject, image, language = "English" })
     : "";
   const system =
     tutorBrief(ks, subject) +
-    " You are marking a photo of a learner's homework. Be warm and always find something to praise. Judge each visible question; if handwriting is unclear, say so kindly rather than guessing." +
+    " You are marking a photo of a learner's handwritten homework. Work carefully: (1) read the whole page, (2) for EACH visible question, work out the correct answer yourself first, (3) compare it to what the learner wrote, (4) only then mark it right or wrong. Never mark something wrong without being sure — if handwriting is genuinely unclear, say so kindly rather than guessing. Be warm and always find something specific to praise. Never invent questions that aren't in the photo." +
     langClause +
     " Reply with ONLY raw JSON:" +
     ' {"subjectDetected":"...","summary":"1-2 friendly sentences","score":"e.g. 6 out of 8 or null","items":[{"label":"Question 1","correct":true,"comment":"short note"}],"praise":"one cheerful line","nextStep":"one gentle tip"}';
   const text = await call({
     max_tokens: 1600,
+    model: MODELS.REASONING,
     system,
     content: [
       { type: "image", source: { type: "base64", media_type: image.mime, data: image.data } },
@@ -86,14 +94,14 @@ export async function solveQuestion({ ks, image, text, language = "English" }) {
     : "";
   const system =
     tutorBrief(ks, null) +
-    " The learner has scanned or typed a question and wants to understand it. Read the question, give the correct final answer, then show clear step-by-step working at the right level." +
+    " The learner has scanned or typed a question and wants to understand it. First read the question exactly as written; if it is from a photo, transcribe it faithfully. Solve it yourself and double-check the arithmetic/logic before answering. Then give the correct final answer, followed by clear step-by-step working pitched at the learner's level — each step should be one idea. If the question is ambiguous or unreadable, say what you assumed." +
     langClause +
     " Reply with ONLY raw JSON:" +
     ' {"questionRead":"...","subject":"...","answer":"the final answer, concise","steps":["step 1","step 2"],"concept":"one line on what this teaches"}';
   const content = [];
   if (image) content.push({ type: "image", source: { type: "base64", media_type: image.mime, data: image.data } });
   content.push({ type: "text", text: text?.trim() ? `Question: ${text.trim()}` : "Solve the question in the image." });
-  const out = await call({ max_tokens: 1400, system, content });
+  const out = await call({ max_tokens: 1400, model: MODELS.REASONING, system, content });
   return extractJSON(out);
 }
 
@@ -168,6 +176,22 @@ export async function examQuestions({ course, modules = [], count = 10, language
   return Array.isArray(data?.quiz) ? data.quiz : [];
 }
 
+// Generate a printable practice worksheet (short-answer, with an answer key) for
+// a topic. Returns { title, instructions, questions:[{q, answer}] }.
+export async function generateWorksheet({ ks, subject, topic, count = 10, language = "English" }) {
+  const langClause = (language && language !== "English")
+    ? ` Write the title, instructions, every question and every answer in natural, age-appropriate ${language}. Keep numerals and standard symbols.`
+    : "";
+  const system =
+    tutorBrief(ks, subject) +
+    ` Create a printable practice worksheet of exactly ${count} short-answer questions on the topic, ordered easiest to hardest. These are written on paper, so NO multiple choice — the learner writes the answer. Each answer must be correct and concise. Keep questions self-contained (no reference to earlier questions).` +
+    langClause +
+    ` Reply with ONLY raw JSON (no markdown): {"title":"short worksheet title","instructions":"one friendly line","questions":[{"q":"the question","answer":"the correct answer"}]}.`;
+  const out = await call({ system, content: `Topic: ${topic}. Make ${count} varied questions suitable for a worksheet.`, max_tokens: 2200 });
+  const data = extractJSON(out);
+  return { title: data.title || `${topic} worksheet`, instructions: data.instructions || "", questions: Array.isArray(data.questions) ? data.questions.slice(0, count) : [] };
+}
+
 // Interpret a spoken command and route it to one in-app action.
 export async function voiceCommand({ transcript, actions = [] }) {
   const system =
@@ -177,7 +201,7 @@ export async function voiceCommand({ transcript, actions = [] }) {
     `Map phrases like "open the calculator" -> calculator; "show my progress" -> grownups; "subscribe"/"plans" -> plans; "languages" -> languages; "courses"/"exam" -> courses; "home" -> home; "settings" -> settings. ` +
     `For practice/quiz requests use action "play" and fill subject, topic and count: e.g. "give me 10 KS2 fractions questions" -> {action:"play",ks:"ks2",subject:"maths",topic:"fractions",count:10}. ` +
     `For changing my speaking language use action "setLanguage" with the language name: e.g. "speak in French"/"change language to Spanish" -> {action:"setLanguage",language:"French"}. If unclear, use action "unknown".`;
-  const out = await call({ system, content: `Command: "${transcript}"`, max_tokens: 220 });
+  const out = await call({ system, content: `Command: "${transcript}"`, max_tokens: 220, model: MODELS.FAST });
   return extractJSON(out);
 }
 
@@ -185,7 +209,7 @@ export async function voiceCommand({ transcript, actions = [] }) {
 export async function translateText({ text, language }) {
   if (!text) return "";
   const system = `Translate the user's text into ${language}. Reply with ONLY the natural translation — no quotes, no notes, no transliteration, no English.`;
-  const out = await call({ system, content: String(text), max_tokens: 400 });
+  const out = await call({ system, content: String(text), max_tokens: 400, model: MODELS.FAST });
   return (out || "").trim();
 }
 
@@ -196,7 +220,7 @@ export async function translateBatch({ strings = [], language }) {
     `Translate each item of the user's JSON array of short app UI strings into ${language}. ` +
     `Keep brand names (Education Academy, Mochi), prices like "£3/mo", emoji and placeholders intact. ` +
     `Reply with ONLY a raw JSON array of strings, the same length and order, each the translation of the matching item — no notes.`;
-  const out = await call({ system, content: JSON.stringify(strings), max_tokens: 2000 });
+  const out = await call({ system, content: JSON.stringify(strings), max_tokens: 2000, model: MODELS.FAST });
   try { const arr = JSON.parse((out || "").replace(/```json/gi, "").replace(/```/g, "").trim()); return Array.isArray(arr) ? arr : []; }
   catch { return []; }
 }

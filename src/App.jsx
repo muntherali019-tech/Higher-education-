@@ -4,9 +4,10 @@ import {
   Lock, Crown, ScanLine, Lightbulb, BarChart3, Volume2, VolumeX, Settings, Languages as LangIcon, GraduationCap, Mic, Calculator as CalcIcon, Globe,
 } from "lucide-react";
 import Mochi from "./components/Mochi.jsx";
-import { KS_LABEL, KS_META, SUBJ, SUBJECTS_BY_KS, TOPICS, PLANS, planForKs } from "./data/curriculum.js";
+import { KS_LABEL, KS_META, SUBJ, SUBJECTS_BY_KS, TOPICS, PLANS, planForKs, grantPlan } from "./data/curriculum.js";
 import { LANGUAGES } from "./data/languages.js";
 import { BANK } from "./data/bank.js";
+import { demoState, DEMO_ROUND } from "./data/demo.js";
 import { generateQuestions, markHomework, solveQuestion, voiceCommand, translateText, askTutor } from "./lib/api.js";
 import { loadState, saveState, defaultState, recordRound, overview, weakestTopics, recordCourseResult, addStars, touchStreak, DAILY_GOAL, starsToday, dailyDone, markDailyDone } from "./lib/progress.js";
 import { badgeStatus, earnedCount, BADGES } from "./lib/achievements.js";
@@ -28,6 +29,9 @@ import { cheer } from "./lib/coach.js";
 import Languages from "./components/Languages.jsx";
 import Courses from "./components/Courses.jsx";
 import Calc from "./components/Calculator.jsx";
+import Worksheet from "./components/Worksheet.jsx";
+import Gift from "./components/Gift.jsx";
+import { printCertificate } from "./lib/printable.js";
 
 const ROUND_SIZE = 15;
 const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
@@ -150,6 +154,19 @@ export default function App() {
   }
   function startDaily() { const p = dailyPick(); startRound(p.ks, p.subject, p.topic, 5, true); }
 
+  // Live demo: play a curated real round instantly (no network), or fill the
+  // parent dashboard with a believable sample learner. Both are non-destructive
+  // (the sample round doesn't touch saved progress; demo data only loads when
+  // the dashboard is empty, and "Reset progress" clears it).
+  function playSampleRound() {
+    setDailyActive(false);
+    setKs(DEMO_ROUND.ks); setSubject(DEMO_ROUND.subject); setTopic(DEMO_ROUND.topic);
+    setQi(0); setPicked(null); setCorrectCount(0); setStreak(0); setBestStreak(0);
+    setUsedFallback(false); setLoadingQ(false); setQuestions(DEMO_ROUND.questions);
+    setScreen("play");
+  }
+  function loadDemoData() { setState((s) => ({ ...demoState(), subs: s.subs })); }
+
   function answer(i) {
     if (picked !== null) return;
     setPicked(i);
@@ -229,7 +246,7 @@ export default function App() {
       const r = await billing.purchase(plan);
       if (r?.redirect) return;            // we're leaving for Stripe's hosted checkout page
       if (r?.ok) {
-        setState((s) => ({ ...s, subs: { ...s.subs, [plan]: true } }));
+        setState((s) => ({ ...s, subs: grantPlan(s.subs, plan) }));
         if (pendingKs) { setKs(pendingKs); setSubject(null); setScreen("menu"); }
         else setScreen("plans");
       } else { setBuyError("Purchase didn't complete. Please try again."); setScreen(pendingKs ? "paywall" : "plans"); }
@@ -490,6 +507,24 @@ export default function App() {
   const ov = overview(state);
   const weak = weakestTopics(state);
 
+  /* ---------- premium tools: certificate, worksheet, gift redeem ---------- */
+  const [wsPreset, setWsPreset] = useState(null);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemMsg, setRedeemMsg] = useState("");
+  function makeCertificate() {
+    const m = KS_META.find((k) => SUBJECTS_BY_KS[k.id].some((s) => state.stats[`${k.id}:${s}`]?.answered));
+    printCertificate({ name: bound?.name || "Your learner", stage: m ? KS_LABEL[m.id] : "", stars: state.stars, accuracy: ov.accuracy, answered: ov.answered, rounds: ov.rounds });
+  }
+  function openWorksheet(preset = null) { setWsPreset(preset); setScreen("worksheet"); }
+  async function redeemGiftCode() {
+    setRedeemMsg("");
+    try {
+      const r = await billing.redeemGift(redeemCode.trim());
+      setState((s) => ({ ...s, subs: grantPlan(s.subs, r.plan) }));
+      setRedeemCode(""); setRedeemMsg(t("🎉 Gift unlocked! Enjoy learning with Mochi."));
+    } catch (e) { setRedeemMsg(e.message || t("That code isn't valid or has already been used.")); }
+  }
+
   /* ---------- AI voice commands ---------- */
   const [vListening, setVListening] = useState(false);
   const [vMsg, setVMsg] = useState("");
@@ -666,6 +701,14 @@ export default function App() {
             </span>
             {!dailyDone(state) && <ArrowRight size={20} />}
           </button>
+          {(state.history?.length || 0) === 0 && (
+            <button className="card toolcard demoCta" onClick={playSampleRound} aria-label="Try a free sample round">
+              <div className="toolicon" style={{ background: "var(--sky-soft)", fontSize: 24 }} aria-hidden="true">✨</div>
+              <div style={{ flex: 1 }}><div className="fred" style={{ fontWeight: 600, fontSize: 19 }}>{t("Try a free sample round")}</div>
+                <div style={{ fontWeight: 700, color: "var(--muted)", fontSize: 13 }}>{t("Five real questions — no sign-up needed")}</div></div>
+              <ArrowRight size={22} color="#2b80d6" />
+            </button>
+          )}
           <div className="homeq">
             <button className="qbtn" onClick={openAsk}>💬 {t("Ask Mochi")}</button>
             <button className="qbtn" onClick={startSmart}>🎯 {t("Smart Practice")}</button>
@@ -714,7 +757,8 @@ export default function App() {
               ? <button className="bigbtn mint" onClick={() => startTrialFor(null)}>{t("Start your 72-hour free trial")}</button>
               : <p className="note" style={{ textAlign: "center" }}>{t("Your free trial has ended — subscribe to keep learning.")}</p>}
           {Object.entries(PLANS).map(([key, p]) => (
-            <div key={key} className="plan" style={{ background: p.color }}>
+            <div key={key} className={`plan${p.best ? " best" : ""}`} style={{ background: p.color }}>
+              {p.best && <span className="ribbon">{t("Best value")}</span>}
               <h3 className="fred">{p.name}</h3>
               <div style={{ marginTop: 6 }}><span className="price">{priceFor(key)}</span><span style={{ fontWeight: 800 }}> {t("/month")}</span></div>
               <div style={{ fontWeight: 800, opacity: .95, marginTop: 2 }}>{p.covers}</div>
@@ -992,7 +1036,13 @@ export default function App() {
             <div className="stat"><b>{ov.rounds}</b><span>Rounds played</span></div>
           </div>
 
-          {ov.answered === 0 && <p className="empty">No activity yet. Play a round to see progress here.</p>}
+          {ov.answered === 0 && (
+            <div className="card" style={{ textAlign: "center" }}>
+              <p className="empty" style={{ margin: "0 0 10px" }}>No activity yet. Play a round to see progress here.</p>
+              <button className="bigbtn mint" onClick={loadDemoData}>✨ See a live demo</button>
+              <p className="note" style={{ marginTop: 6 }}>Loads a sample learner so you can see a full dashboard. Clear it any time with “Reset progress”.</p>
+            </div>
+          )}
 
           {/* per-stage / per-subject accuracy */}
           {KS_META.map((m) => {
@@ -1021,7 +1071,10 @@ export default function App() {
                 {weak.map((w, i) => (
                   <div className="tinytopic" key={i} style={{ fontSize: 14, color: "var(--ink)" }}>
                     <span>{KS_LABEL[w.ks]} · {SUBJ[w.subject].name} · {w.topic}</span>
-                    <span style={{ color: accColor(w.accuracy), fontWeight: 800 }}>{w.accuracy}%</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <button className="linkbtn" onClick={() => openWorksheet({ ks: w.ks, subject: w.subject, topic: w.topic })}>📝 Worksheet</button>
+                      <span style={{ color: accColor(w.accuracy), fontWeight: 800 }}>{w.accuracy}%</span>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -1042,11 +1095,30 @@ export default function App() {
             </>
           )}
 
+          <div className="sectitle">Rewards & extras</div>
+          <div className="premrow">
+            <button className="premcard" onClick={makeCertificate} disabled={ov.answered === 0}>
+              <div className="pemoji" style={{ background: "#FFF0CC" }}>🏆</div>
+              <div style={{ flex: 1 }}><div className="ptitle">{t("Certificate of achievement")}</div>
+                <div className="psub">{tf("Print or save a certificate of {name}'s progress", { name: bound?.name || "your learner" })}</div></div>
+            </button>
+            <button className="premcard" onClick={() => openWorksheet(weak[0] ? { ks: weak[0].ks, subject: weak[0].subject, topic: weak[0].topic } : null)}>
+              <div className="pemoji">📝</div>
+              <div style={{ flex: 1 }}><div className="ptitle">{t("Practice worksheet")}</div>
+                <div className="psub">{t("Make a printable worksheet")}</div></div>
+            </button>
+            <button className="premcard" onClick={() => setScreen("gift")}>
+              <div className="pemoji" style={{ background: "#FFE3EA" }}>🎁</div>
+              <div style={{ flex: 1 }}><div className="ptitle">{t("Gift a subscription")}</div>
+                <div className="psub">{t("Give a month of Mochi to a friend or family")}</div></div>
+            </button>
+          </div>
+
           {bound ? (
-            <div className="chip" style={{ margin: "0 0 12px" }}><RefreshCw size={14} /> Syncing this device to a child profile
+            <div className="chip" style={{ margin: "12px 0" }}><RefreshCw size={14} /> Syncing this device to a child profile
               <button className="linkbtn" style={{ marginLeft: 8 }} onClick={() => setBound(null)}>Stop</button></div>
           ) : null}
-          <button className="bigbtn purple" onClick={() => setScreen("grownups")}>Parent &amp; Teacher portal →</button>
+          <button className="bigbtn purple" style={{ marginTop: 12 }} onClick={() => setScreen("grownups")}>Parent &amp; Teacher portal →</button>
           <button className="bigbtn ghost" onClick={resetProgress} style={{ marginTop: 18 }}>Reset progress</button>
           <p className="note">No ads, ever. Progress saves on this device and syncs across devices when you use an account. <button className="linkbtn" onClick={openPrivacy}>Privacy policy</button></p>
         </main>
@@ -1203,6 +1275,12 @@ export default function App() {
       {/* ---------- CALCULATOR ---------- */}
       {screen === "calc" && <Calc onClose={goHome} />}
 
+      {/* ---------- PRACTICE WORKSHEET (premium tool) ---------- */}
+      {screen === "worksheet" && <Worksheet onClose={() => setScreen("dashboard")} preset={wsPreset} language={langName()} />}
+
+      {/* ---------- GIFT A SUBSCRIPTION ---------- */}
+      {screen === "gift" && <Gift onClose={() => setScreen("dashboard")} />}
+
       {/* ---------- SETTINGS ---------- */}
       {screen === "settings" && (
         <main>
@@ -1250,6 +1328,14 @@ export default function App() {
           <button className="bigbtn ghost" onClick={() => review.requestReview()}><Star size={18} style={{ verticalAlign: "-3px", marginRight: 6 }} />{t("Rate Education Academy")}</button>
           <button className="bigbtn ghost" onClick={manageSub}>{t("Manage subscription")}</button>
           {manageMsg && <p className="note" style={{ textAlign: "center" }}>{manageMsg}</p>}
+          <div className="card" style={{ marginTop: 8 }}>
+            <div style={{ fontWeight: 800 }}>🎁 {t("Redeem a gift code")}</div>
+            <div className="giftredeem">
+              <input className="chatinput" value={redeemCode} onChange={(e) => setRedeemCode(e.target.value.toUpperCase())} placeholder={t("Enter your gift code")} aria-label={t("Enter your gift code")} />
+              <button className="bigbtn mint" style={{ width: "auto", padding: "12px 18px" }} onClick={redeemGiftCode} disabled={!redeemCode.trim()}>{t("Redeem")}</button>
+            </div>
+            {redeemMsg && <p className="note" style={{ textAlign: "center", marginTop: 4 }}>{redeemMsg}</p>}
+          </div>
           {!String(voiceLang).startsWith("en") && <p className="note"><button className="linkbtn" onClick={resetTranslations}>{t("Reset translations")}</button></p>}
           <p className="note"><button className="linkbtn" onClick={openPrivacy}>{t("Privacy policy")}</button></p>
         </main>
