@@ -8,6 +8,7 @@
     "dev": "vite --mode web",
     "dev:app": "vite --mode app",
     "server": "node server/index.js",
+    "test": "node --test",
     "start": "concurrently -k -n web,api -c green,cyan \"vite --mode web\" \"node server/index.js\"",
     "build": "vite build --mode web",
     "build:web": "vite build --mode web",
