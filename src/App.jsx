@@ -415,6 +415,11 @@ export default function App() {
   useEffect(() => {
     try { document.documentElement.dir = rtl ? "rtl" : "ltr"; document.documentElement.lang = String(voiceLang || "en").split("-")[0]; } catch {}
   }, [voiceLang, rtl]);
+  // First-launch language chooser so new users worldwide start in their own language.
+  // Declared before the effects below: their dependency arrays are evaluated during
+  // render, so a `const` further down the body puts `onboard` in the temporal dead
+  // zone and throws "Cannot access 'onboard' before initialization" on every mount.
+  const [onboard, setOnboard] = useState(() => { try { return localStorage.getItem("whisker.onboarded") !== "1"; } catch { return false; } });
   useEffect(() => {
     if (screen === "home" && guideOn && !onboard && !greetedRef.current) {
       greetedRef.current = true;
@@ -490,8 +495,6 @@ export default function App() {
     } catch {}
     return () => { alive = false; };
   }, []);
-  // First-launch language chooser so new users worldwide start in their own language.
-  const [onboard, setOnboard] = useState(() => { try { return localStorage.getItem("whisker.onboarded") !== "1"; } catch { return false; } });
   const detectedLang = LANGUAGES.find((l) => String((typeof navigator !== "undefined" && navigator.language) || "").toLowerCase().startsWith(l.id));
   function pickOnboardLang(code) { try { localStorage.setItem("whisker.onboarded", "1"); } catch {} if (code) setVoiceLang(code); setOnboard(false); }
   const billingNote = billing.mode() === "stripe"
