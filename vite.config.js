@@ -25,5 +25,14 @@ export default defineConfig(async ({ mode }) => {
     plugins,
     build: { outDir, emptyOutDir: true },
     server: { port: 5173, proxy: { "/api": "http://localhost:8787" } },
+    // Vitest: client code (src) runs in jsdom for localStorage/window/DOM;
+    // server code (Node/Express) runs in the node environment.
+    test: {
+      globals: true,
+      environment: "node",
+      environmentMatchGlobs: [["src/**", "jsdom"]],
+      setupFiles: ["./test/setup.js"],
+      include: ["{src,server,test}/**/*.{test,spec}.{js,jsx}"],
+    },
   };
 });
