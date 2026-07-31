@@ -193,10 +193,13 @@ Revenue paths, all built on the existing billing/Stripe plumbing:
   tier by extending `PLANS`, `billing.js` (`PRODUCT_IDS`/`ENTITLEMENTS`), the
   Stripe price map, and `grantPlan`.
 - **Gift subscriptions** (`src/components/Gift.jsx`, `billing.giftCheckout`/
-  `redeemGift`): mock mode mints a code instantly; the web build runs a one-time
-  Stripe Checkout (`/api/gift/checkout`) and the webhook mints a `GIFT-XXXX` code
-  stored in `db.gifts`. Codes are redeemed in Settings (`/api/gift/redeem`), which
-  grants the plan for 30 days.
+  `redeemGift`): in dev/mock, `/api/gift/mock-create` mints a code instantly — and
+  is **disabled once `STRIPE_SECRET_KEY` is set** so it can't mint free plans in
+  production. The web build runs a one-time Stripe Checkout (`/api/gift/checkout`)
+  and the webhook mints a `GIFT-XXXX` code stored in `db.gifts`. Codes are redeemed
+  in Settings (`/api/gift/redeem`), which grants the plan for 30 days; `enforceGiftExpiry`
+  (in the `auth()` wrapper) revokes gifted access after the window unless a Stripe
+  subscription backs the account.
 - **Printable certificates & worksheets** (`src/lib/printable.js`,
   `src/components/Worksheet.jsx`): self-contained print/PDF via a hidden iframe —
   no layout coupling. Worksheets are AI-generated (`api.generateWorksheet`) and

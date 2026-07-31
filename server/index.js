@@ -94,11 +94,23 @@ function childrenForUser(db, user) {
   return [...ids].map((id) => db.children[id]).filter(Boolean);
 }
 const childCard = (c) => ({ id: c.id, name: c.name, ks: c.ks, overview: overview(c.state || DEFAULT_STATE()) });
+// A redeemed gift grants access for a fixed window (see /api/gift/redeem). Once it
+// lapses, revoke the gifted plans — but only when the account has no Stripe
+// subscription backing it, so a paying subscriber is never downgraded here (their
+// entitlement is owned by the Stripe webhook). Returns true if it mutated `user`.
+function enforceGiftExpiry(user) {
+  if (!user?.giftExpiry || Date.now() <= user.giftExpiry) return false;
+  if (user.stripeSubId || user.stripeCustomerId) return false;
+  user.subs = { junior: false, adult: false, family: false };
+  user.giftExpiry = 0;
+  return true;
+}
 // gate a handler behind a valid token
 const auth = (handler) => (req, res) => {
   const db = load();
   const user = userFromReq(db, req);
   if (!user) return res.status(401).json({ error: "Please sign in." });
+  if (enforceGiftExpiry(user)) save(db);
   return handler(req, res, db, user);
 };
 
@@ -575,7 +587,11 @@ app.get("/api/gift/code", (req, res) => {
 });
 
 // Dev/mock: mint a gift code without payment (used when billing is in mock mode).
+// Disabled once real payments are configured (STRIPE_SECRET set) so it can't be
+// abused to mint free subscriptions in production — real gifting goes through
+// /api/gift/checkout and the webhook there.
 app.post("/api/gift/mock-create", (req, res) => {
+  if (STRIPE_SECRET) return res.status(403).json({ error: "Gifts must be purchased. This dev endpoint is disabled in production." });
   const plan = req.body?.plan;
   if (!GIFT_PLANS.has(plan)) return res.status(400).json({ error: "Unknown plan." });
   const db = load();
