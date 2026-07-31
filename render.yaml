@@ -24,6 +24,12 @@ services:
         sync: false
       - key: STRIPE_PRICE_FAMILY
         sync: false
+      - key: STRIPE_PRICE_JUNIOR_YEARLY
+        sync: false
+      - key: STRIPE_PRICE_ADULT_YEARLY
+        sync: false
+      - key: STRIPE_PRICE_FAMILY_YEARLY
+        sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: STRIPE_GIFT_PRICE_JUNIOR
@@ -39,4 +45,7 @@ services:
       # on Render's ephemeral disk). The `pg` driver is already installed via
       # optionalDependencies, so setting this value is all that's needed.
       - key: DATABASE_URL
+        sync: false
+      # Admin secret for the weekly report + analytics funnel endpoints:
+      - key: ADMIN_SECRET
         sync: false
