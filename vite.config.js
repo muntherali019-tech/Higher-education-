@@ -29,12 +29,29 @@ export default defineConfig(async ({ mode }) => {
     // server code (Node/Express) runs in the node environment.
     test: {
       globals: true,
-      environment: "node",
-      environmentMatchGlobs: [["src/**", "jsdom"]],
       setupFiles: ["./test/setup.js"],
       // test/ holds node:test suites run separately by `node --test test/`;
-      // vitest owns the src/ and server/ specs only.
-      include: ["{src,server}/**/*.{test,spec}.{js,jsx}"],
+      // vitest owns the src/ and server/ specs only. Client code needs a DOM
+      // (localStorage/window), server code must stay on Node — split into two
+      // projects, since vitest 4 dropped environmentMatchGlobs.
+      projects: [
+        {
+          extends: true,
+          test: {
+            name: "client",
+            environment: "jsdom",
+            include: ["src/**/*.{test,spec}.{js,jsx}"],
+          },
+        },
+        {
+          extends: true,
+          test: {
+            name: "server",
+            environment: "node",
+            include: ["server/**/*.{test,spec}.{js,jsx}"],
+          },
+        },
+      ],
     },
   };
 });

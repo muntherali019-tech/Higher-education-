@@ -36,7 +36,7 @@ Google Play Store. Each step is tagged:
 ## 1. Run it locally  [CODE ✓ — you just run it]
 
 ```bash
-cd whisker-academy
+cd Higher-education-
 npm install
 cp .env.example .env        # then paste your Anthropic API key into .env
 npm start                   # runs the web app (5173) + API (8787) together
