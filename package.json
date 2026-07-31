@@ -6,7 +6,7 @@
   "description": "Education Academy \u2014 a cat-themed learning game for UK KS1\u2013KS3 and Higher Education, with AI homework marking and a scan-and-solve helper.",
   "scripts": {
     "test:watch": "vitest",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/*.test.js",
     "dev": "vite --mode web",
     "dev:app": "vite --mode app",
     "server": "node server/index.js",

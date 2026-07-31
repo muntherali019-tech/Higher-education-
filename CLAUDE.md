@@ -31,9 +31,10 @@ orientation map for changing the code.
 - **Data:** a JSON file store by default, optionally Postgres (`server/store.js`).
 - **State (client):** React hooks + `localStorage` (keys prefixed `whisker.`).
 
-There is **no test framework and no linter/formatter** configured for the main app.
-"Verification" means running the dev server and exercising the flow by hand, and
-`node --check` on server files. (CI only runs against `reelmint/`.)
+Tests use **Node's built-in `node:test`** runner (`npm test`) — no Jest/Vitest and no
+extra test dependencies. There is still **no linter/formatter** configured. Anything
+the suite doesn't cover (the React UI in particular) is verified by running the dev
+server and exercising the flow by hand, plus `node --check` on server files.
 
 ## Common commands
 
@@ -44,6 +45,7 @@ npm start              # run web app (Vite :5173) + API (Express :8787) together
 npm run dev            # web front-end only (mode web), instant "mock" unlock for testing
 npm run dev:app        # front-end in app mode
 npm run server         # Express API only, on :8787
+npm test               # node:test — the full suite (run this before committing)
 
 npm run build          # == build:web  -> dist-web/
 npm run build:web      # website build (Stripe payments)          -> dist-web/
@@ -55,8 +57,18 @@ npm run cap:sync       # build:app + copy assets into the android/ project
 npm run cap:open       # open Android Studio
 ```
 
-There is no single "run the tests" command. To sanity-check the server without a
-browser: `node --check server/index.js` and hit `GET /api/health`.
+`npm test` runs four suites in `test/` (no keys or network needed — it boots the real
+server in a temp directory with the AI/Stripe keys stripped):
+
+| Suite | Covers |
+|---|---|
+| `server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
+| `plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
+| `progress.test.js` | `src/lib/progress.js` — stars, streaks, freezes, rounds, daily goal |
+| `bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
+
+To sanity-check the server without a browser: `node --check server/index.js` and hit
+`GET /api/health`.
 
 ## Architecture
 
@@ -245,9 +257,10 @@ build step**) that turns a prompt into videos/images/copy.
   default model of `claude-opus-4-8`, and runs in a clickable **demo mode** when
   `ANTHROPIC_API_KEY` is unset.
 - Run it with `cd reelmint && npm install && npm start`.
-- **The repository's GitHub Actions workflow (`.github/workflows/ci.yml`) targets
-  `reelmint/` only** — it installs, `node --check`s and smoke-tests the reelmint
-  server. It does **not** build or test the Education Academy app.
+- **`.github/workflows/ci.yml` targets `reelmint/` only** — it installs, `node --check`s
+  and smoke-tests the reelmint server. The Education Academy app is covered separately
+  by `.github/workflows/main-ci.yml` (audit → `npm test` → syntax-check → all three
+  builds → API smoke test).
 
 Treat changes to `reelmint/` and to the main app as independent. Don't cross-import
 between them.
@@ -263,6 +276,10 @@ between them.
 - Adding client state? Extend `defaultState()` in `src/lib/progress.js`.
 - Adding a backend route? Use `auth(...)` for protected routes, go through
   `load()`/`save()`, and never return raw user records — shape them like `pub()`.
-- Verify by running `npm start` and clicking through the affected flow; run
+- Adding a question to the offline bank? `bank.test.js` enforces the invariants —
+  4 distinct non-empty choices, an in-range `answerIndex`, an explanation, no repeated
+  question text, and at least a full round (15) per stage/subject.
+- Run `npm test` before committing, and add a test alongside any new route or logic.
+- Verify UI changes by running `npm start` and clicking through the affected flow; run
   `node --check server/index.js` after server edits.
 - Keep the Anthropic/Stripe/ElevenLabs secrets server-side.

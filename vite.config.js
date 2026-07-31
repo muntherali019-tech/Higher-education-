@@ -32,7 +32,9 @@ export default defineConfig(async ({ mode }) => {
       environment: "node",
       environmentMatchGlobs: [["src/**", "jsdom"]],
       setupFiles: ["./test/setup.js"],
-      include: ["{src,server,test}/**/*.{test,spec}.{js,jsx}"],
+      // test/ holds node:test suites run separately by `node --test test/`;
+      // vitest owns the src/ and server/ specs only.
+      include: ["{src,server}/**/*.{test,spec}.{js,jsx}"],
     },
   };
 });
