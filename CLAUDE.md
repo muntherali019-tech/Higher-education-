@@ -31,10 +31,9 @@ orientation map for changing the code.
 - **Data:** a JSON file store by default, optionally Postgres (`server/store.js`).
 - **State (client):** React hooks + `localStorage` (keys prefixed `whisker.`).
 
-Tests use **Node's built-in `node:test`** runner (`npm test`) — no Jest/Vitest and no
-extra test dependencies. There is still **no linter/formatter** configured. Anything
-the suite doesn't cover (the React UI in particular) is verified by running the dev
-server and exercising the flow by hand, plus `node --check` on server files.
+Tests run on **two runners**, both under `npm test`: **Vitest** for `src/` (jsdom)
+and `server/` (node) specs, and **Node's built-in `node:test`** for the HTTP suites
+in `test/`. There is still **no linter/formatter** configured.
 
 ## Common commands
 
@@ -57,15 +56,31 @@ npm run cap:sync       # build:app + copy assets into the android/ project
 npm run cap:open       # open Android Studio
 ```
 
-`npm test` runs four suites in `test/` (no keys or network needed — it boots the real
-server in a temp directory with the AI/Stripe keys stripped):
+`npm test` runs `vitest run` then the `node:test` suites in `test/`. No keys or
+network are needed — the HTTP suites boot the real server in a temp directory with
+the AI/Stripe keys stripped.
 
 | Suite | Covers |
 |---|---|
-| `server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
-| `plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
-| `progress.test.js` | `src/lib/progress.js` — stars, streaks, freezes, rounds, daily goal |
-| `bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
+| `src/App.test.jsx` | **render smoke tests** — mounts the shell and asserts real UI, not the crash screen (see below) |
+| `src/lib/*.test.js` | client logic under jsdom: progress, api, achievements, trial, examCache, mochiShop, recognition |
+| `server/*.test.js` | auth and store units under node |
+| `test/server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
+| `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
+| `test/progress.test.js` | stars, streaks, freezes, rounds, daily goal |
+| `test/bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
+
+**Keep `src/App.test.jsx` passing, and add to it when you touch the shell.** A
+`ReferenceError: Cannot access 'onboard' before initialization` once shipped to
+`main` with a fully green build: every suite covered the Express API or pure logic
+and nothing mounted `App`, so the app rendered nothing but the `ErrorBoundary`
+fallback on every load while CI stayed green. Those tests mount the shell exactly
+the way `src/main.jsx` does and fail on anything that throws during render.
+
+A related trap that file guards against: **declare state above the effects that
+read it.** Dependency arrays are evaluated during render at their position in the
+component body, so a `const` declared further down puts the variable in the
+temporal dead zone and throws on first mount.
 
 To sanity-check the server without a browser: `node --check server/index.js` and hit
 `GET /api/health`.
