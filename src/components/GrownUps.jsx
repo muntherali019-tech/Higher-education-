@@ -288,7 +288,10 @@ Sent from Education Academy`;
             </>
           )}
           <div className="field"><label>{tr("Email")}</label><input className="tin" type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-          <div className="field"><label>{tr("Password")}</label><input className="tin" type="password" autoComplete={mode === "up" ? "new-password" : "current-password"} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submitAuth()} /></div>
+          {/* minLength/hint are a courtesy only when signing up — the server is the
+              authority and rejects anything under 8 with a message we render below. */}
+          <div className="field"><label>{tr("Password")}</label><input className="tin" type="password" autoComplete={mode === "up" ? "new-password" : "current-password"} minLength={mode === "up" ? 8 : undefined} aria-describedby={mode === "up" ? "pw-hint" : undefined} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} onKeyDown={(e) => e.key === "Enter" && submitAuth()} />
+            {mode === "up" && <p className="fieldhint" id="pw-hint">{tr("At least 8 characters")}</p>}</div>
           {authErr && <p className="err">{authErr}</p>}
           <button className="bigbtn purple" disabled={authBusy} onClick={submitAuth}>
             {authBusy ? <Loader2 className="wiggle" size={18} /> : mode === "up" ? tr("Create account") : tr("Sign in")}

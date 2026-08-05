@@ -65,7 +65,7 @@ the AI/Stripe keys stripped.
 | `src/App.test.jsx` | **render smoke tests** — mounts the shell and asserts real UI, not the crash screen (see below) |
 | `src/lib/*.test.js` | client logic under jsdom: progress, api, achievements, trial, examCache, mochiShop, recognition |
 | `server/*.test.js` | auth and store units under node |
-| `test/server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
+| `test/server.test.js` | the API over real HTTP: auth (incl. the password minimum), rate limiting, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
 | `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
 | `test/progress.test.js` | stars, streaks, freezes, rounds, daily goal |
 | `test/bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
@@ -208,6 +208,17 @@ reelmint/                  SEPARATE project — see below
 - **Auth pattern:** wrap protected routes in the `auth(handler)` helper in
   `server/index.js`; it resolves the bearer token to a user and 401s otherwise.
   `pub(user)` is the only shape sent to the client (never leak `salt`/`hash`).
+  Signup enforces a minimum password length server-side — the client hint is a
+  courtesy, never the check.
+- **Rate limiting:** `rateLimit(max, windowMs)` in `server/index.js` is a
+  dependency-free fixed-window limiter keyed on IP + path. `authLimit` (10 per
+  15 min) guards signup/login against brute force; `aiLimit` (30 per 5 min)
+  guards `/api/claude` and `/api/tts`, which take **no token** by design — the
+  limiter is the only thing between an anonymous caller and the paid upstream.
+  Budgets are per path, so a test file's signup and login allowances are
+  separate; `server.test.js` spends 8 signups and deliberately exhausts login.
+  It is in-memory, so multi-instance deploys need a shared store or a gateway
+  limit.
 
 ## Monetisation & premium features
 

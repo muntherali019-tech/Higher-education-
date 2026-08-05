@@ -213,3 +213,29 @@ test("unknown API paths do not fall through to the SPA shell", async () => {
   const res = await fetch(`${BASE}/api/definitely-not-a-route`);
   assert.notEqual(res.status, 200);
 });
+
+test("login is rate-limited after repeated attempts", async () => {
+  // 2 logins used earlier; the limiter allows 10 per 15 min, so the 11th 429s.
+  let limited = null;
+  for (let i = 0; i < 9; i++) {
+    const r = await api("POST", "/api/auth/login", { body: { email: "parenta@example.com", password: "wrongpassword" } });
+    if (r.status === 429) { limited = { attempt: i + 3, ...r }; break; }
+    assert.equal(r.status, 401);
+  }
+  assert.ok(limited, "rate limiter never triggered");
+  assert.equal(limited.attempt, 11, "the 11th login attempt should be limited");
+  assert.match(limited.body.error, /Too many requests/);
+});
+
+test("the open AI proxy is rate-limited so a live key cannot be drained", async () => {
+  // /api/claude takes no token by design, so the limiter is the only thing
+  // between an anonymous caller and the paid upstream. Budget is 30 per 5 min
+  // per IP; a couple were spent earlier, so loop past that rather than pinning
+  // an exact attempt number.
+  let limited = false;
+  for (let i = 0; i < 40; i++) {
+    const r = await api("POST", "/api/claude", { body: { content: "hi" } });
+    if (r.status === 429) { limited = true; break; }
+  }
+  assert.ok(limited, "AI proxy rate limiter never triggered");
+});
