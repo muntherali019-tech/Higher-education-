@@ -225,6 +225,14 @@ reelmint/                  SEPARATE project — see below
   and each allow a request. Without Postgres (or if a query fails) the limiter
   falls back to this process's own counters, which bounds N instances at N×
   the rate rather than dropping the limit entirely.
+- **Schema DDL runs under an advisory lock — keep it that way.** `CREATE TABLE
+  IF NOT EXISTS` is *not* atomic in Postgres: the check and the create are
+  separate steps, so instances booting together (every deploy and scale-up) can
+  both find a table missing and one dies on a duplicate `pg_type` row. The loser
+  then fell through to the **file store** and served its own private copy of the
+  data while looking healthy. `ensureSchema()` in `store.js` wraps all DDL in a
+  transaction holding `pg_advisory_xact_lock`. Add new tables there, not as
+  loose `pool.query` calls.
 - **`TRUST_PROXY` is load-bearing for the limiter.** It is keyed on `req.ip`,
   which behind Render's TLS-terminating proxy is the *proxy's* address unless
   Express is told how many hops to trust — so leaving it unset in production
