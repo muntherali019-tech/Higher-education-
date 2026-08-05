@@ -66,6 +66,7 @@ the AI/Stripe keys stripped.
 | `src/lib/*.test.js` | client logic under jsdom: progress, api, achievements, trial, examCache, mochiShop, recognition |
 | `server/*.test.js` | auth and store units under node |
 | `test/server.test.js` | the API over real HTTP: auth (incl. the password minimum), rate limiting, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
+| `test/proxy.test.js` | `TRUST_PROXY`: forwarded clients get separate rate-limit budgets, and a spoofed `X-Forwarded-For` cannot buy a fresh one |
 | `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
 | `test/progress.test.js` | stars, streaks, freezes, rounds, daily goal |
 | `test/bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
@@ -219,6 +220,14 @@ reelmint/                  SEPARATE project — see below
   separate; `server.test.js` spends 8 signups and deliberately exhausts login.
   It is in-memory, so multi-instance deploys need a shared store or a gateway
   limit.
+- **`TRUST_PROXY` is load-bearing for the limiter.** It is keyed on `req.ip`,
+  which behind Render's TLS-terminating proxy is the *proxy's* address unless
+  Express is told how many hops to trust — so leaving it unset in production
+  puts every visitor in one bucket and the 11th login site-wide locks everyone
+  out. Setting it when there is **no** proxy is the opposite failure: callers
+  can spoof `X-Forwarded-For` and get a fresh bucket per request. `render.yaml`
+  sets it to 1; leave it unset locally. `test/proxy.test.js` pins both
+  directions.
 
 ## Monetisation & premium features
 

@@ -14,6 +14,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 dotenv.config();
 
 const app = express();
+// Behind a reverse proxy (Render, Heroku, nginx…) set TRUST_PROXY so req.ip is the
+// real client address. Without it every visitor shares the proxy's IP, so one busy
+// user's rate limit throttles the whole site. Leave it unset when clients connect
+// directly — trusting X-Forwarded-For there lets any caller spoof their IP and slip
+// the limiter entirely. Accepts a hop count ("1") or anything else Express
+// understands ("loopback", "10.0.0.0/8"), passed through rather than coerced.
+const TRUST_PROXY = (process.env.TRUST_PROXY || "").trim();
+if (TRUST_PROXY) app.set("trust proxy", /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY);
 app.use(cors());
 
 // Tiny fixed-window rate limiter (in-memory, per IP + route) — protects the paid AI/TTS
