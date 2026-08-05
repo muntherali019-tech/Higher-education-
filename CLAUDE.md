@@ -67,6 +67,7 @@ the AI/Stripe keys stripped.
 | `server/*.test.js` | auth and store units under node |
 | `test/server.test.js` | the API over real HTTP: auth (incl. the password minimum), rate limiting, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
 | `test/proxy.test.js` | `TRUST_PROXY`: forwarded clients get separate rate-limit budgets, and a spoofed `X-Forwarded-For` cannot buy a fresh one |
+| `test/ratelimit-shared.test.js` | two server instances against one Postgres share a rate-limit window (needs `TEST_DATABASE_URL`; CI provides it, otherwise skipped) |
 | `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
 | `test/progress.test.js` | stars, streaks, freezes, rounds, daily goal |
 | `test/bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
@@ -218,8 +219,12 @@ reelmint/                  SEPARATE project — see below
   limiter is the only thing between an anonymous caller and the paid upstream.
   Budgets are per path, so a test file's signup and login allowances are
   separate; `server.test.js` spends 8 signups and deliberately exhausts login.
-  It is in-memory, so multi-instance deploys need a shared store or a gateway
-  limit.
+  **Counters are shared across instances when `DATABASE_URL` is set** —
+  `rateLimitHit()` in `store.js` does the whole fixed-window step in one
+  `INSERT … ON CONFLICT` so concurrent instances can't both read the same count
+  and each allow a request. Without Postgres (or if a query fails) the limiter
+  falls back to this process's own counters, which bounds N instances at N×
+  the rate rather than dropping the limit entirely.
 - **`TRUST_PROXY` is load-bearing for the limiter.** It is keyed on `req.ip`,
   which behind Render's TLS-terminating proxy is the *proxy's* address unless
   Express is told how many hops to trust — so leaving it unset in production
