@@ -62,11 +62,22 @@ test("health endpoint reports that no AI key is configured", async () => {
   assert.equal(r.body.hasKey, false);
 });
 
-test("signup rejects missing fields and bad roles", async () => {
+test("signup rejects missing fields, short passwords and bad roles", async () => {
   const missing = await api("POST", "/api/auth/signup", { body: { email: "nopass@example.com" } });
   assert.equal(missing.status, 400);
+  // 7 characters — one short of the minimum, so this pins the boundary rather
+  // than just "some short string".
+  const short = await api("POST", "/api/auth/signup", { body: { email: "short@example.com", password: "sevench" } });
+  assert.equal(short.status, 400);
+  assert.match(short.body.error, /at least 8/);
   const badRole = await api("POST", "/api/auth/signup", { body: { email: "role@example.com", password: "longenough1", role: "admin" } });
   assert.equal(badRole.status, 400);
+});
+
+test("signup accepts a password of exactly the minimum length", async () => {
+  const r = await api("POST", "/api/auth/signup", { body: { email: "eightch@example.com", password: "eightchr" } });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.token);
 });
 
 test("parents and teachers can sign up and receive tokens", async () => {

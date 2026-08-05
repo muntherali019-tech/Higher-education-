@@ -118,6 +118,7 @@ const auth = (handler) => (req, res) => {
 app.post("/api/auth/signup", (req, res) => {
   const { email, password, role = "parent", name = "" } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required." });
+  if (String(password).length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
   if (!["parent", "teacher"].includes(role)) return res.status(400).json({ error: "Invalid role." });
   const db = load();
   const exists = Object.values(db.users).some((u) => u.email.toLowerCase() === String(email).toLowerCase());
