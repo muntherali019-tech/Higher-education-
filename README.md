@@ -1,3 +1,15 @@
+> [!IMPORTANT]
+> **This repository is retired — do not develop here.**
+>
+> Education Academy now lives in one place: **[muntherali019-tech/Education-academy-](https://github.com/muntherali019-tech/Education-academy-)**,
+> which holds this exact codebase plus the per-IP rate limiter and fail-closed Stripe
+> webhook that were missing here.
+>
+> **Do not archive or delete this repo yet.** Render still deploys the live site from
+> this repo's `main` (`autoDeployTrigger: commit`). Re-point the Render service at
+> `Education-academy-` first, confirm the new deploy serves traffic, and only then
+> retire this one.
+
 # 🐱 Education Academy
 
 A cat-themed learning game for UK learners, hosted by **Mochi** the ginger cat. Covers four stages — **Key Stage 1, Key Stage 2, Key Stage 3, and Higher Education** — with 15-question puzzle rounds, AI homework photo-marking, a **scan-and-solve** helper, a subscription paywall, **per-key-stage inspirational theming**, **accounts with cross-device sync**, and a **parent & teacher portal** with separate goal/task tracks and AI-assisted goal suggestions.
