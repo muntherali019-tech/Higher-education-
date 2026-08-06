@@ -215,7 +215,12 @@ reelmint/                  SEPARATE project — see below
   module follows **NIST SP 800-63B**: a length floor plus a blocklist of common
   and context-specific passwords, and deliberately **no** composition rules
   (uppercase/digit/symbol requirements push people to `Password1!` and are
-  explicitly discouraged). Add new blocked words to `COMMON` there.
+  explicitly discouraged). Add new blocked words to `COMMON` there. It also checks the **Have I Been Pwned** corpus when
+  `PWNED_PASSWORDS` is set (`render.yaml` turns it on in production): only the
+  first 5 chars of the SHA-1 leave the process (k-anonymity), no API key is
+  needed, and it **fails open** — an HIBP outage must never block a signup,
+  and the local blocklist has already run. `fetchImpl` is injectable so tests
+  never hit the network.
 - **Rate limiting:** `rateLimit(max, windowMs)` in `server/index.js` is a
   dependency-free fixed-window limiter keyed on IP + path. `authLimit` (10 per
   15 min) guards signup/login against brute force; `aiLimit` (30 per 5 min)
