@@ -210,8 +210,12 @@ reelmint/                  SEPARATE project — see below
 - **Auth pattern:** wrap protected routes in the `auth(handler)` helper in
   `server/index.js`; it resolves the bearer token to a user and 401s otherwise.
   `pub(user)` is the only shape sent to the client (never leak `salt`/`hash`).
-  Signup enforces a minimum password length server-side — the client hint is a
-  courtesy, never the check.
+  Signup enforces password strength server-side via `passwordProblem()` in
+  `server/password.js` — the client hint is a courtesy, never the check. That
+  module follows **NIST SP 800-63B**: a length floor plus a blocklist of common
+  and context-specific passwords, and deliberately **no** composition rules
+  (uppercase/digit/symbol requirements push people to `Password1!` and are
+  explicitly discouraged). Add new blocked words to `COMMON` there.
 - **Rate limiting:** `rateLimit(max, windowMs)` in `server/index.js` is a
   dependency-free fixed-window limiter keyed on IP + path. `authLimit` (10 per
   15 min) guards signup/login against brute force; `aiLimit` (30 per 5 min)

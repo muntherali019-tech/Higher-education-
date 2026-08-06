@@ -70,12 +70,20 @@ test("signup rejects missing fields, short passwords and bad roles", async () =>
   const short = await api("POST", "/api/auth/signup", { body: { email: "short@example.com", password: "sevench" } });
   assert.equal(short.status, 400);
   assert.match(short.body.error, /at least 8/);
+  // Long enough, but the single most guessed password there is. The strength
+  // rules are unit-tested in password.test.js; this pins that the route actually
+  // consults them.
+  const common = await api("POST", "/api/auth/signup", { body: { email: "common@example.com", password: "P@ssw0rd" } });
+  assert.equal(common.status, 400);
+  assert.match(common.body.error, /too easy to guess/);
   const badRole = await api("POST", "/api/auth/signup", { body: { email: "role@example.com", password: "longenough1", role: "admin" } });
   assert.equal(badRole.status, 400);
 });
 
 test("signup accepts a password of exactly the minimum length", async () => {
-  const r = await api("POST", "/api/auth/signup", { body: { email: "eightch@example.com", password: "eightchr" } });
+  // The address deliberately shares nothing with the password: "eightch@…" would
+  // be refused, correctly, for being the email local part plus a letter.
+  const r = await api("POST", "/api/auth/signup", { body: { email: "minlen@example.com", password: "eightchr" } });
   assert.equal(r.status, 200);
   assert.ok(r.body.token);
 });
