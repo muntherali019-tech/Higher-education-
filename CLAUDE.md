@@ -13,10 +13,9 @@ exam-prep courses, subscriptions, and a parent/teacher portal.
 The user-facing README is aimed at people shipping the app; this file is the
 orientation map for changing the code.
 
-> **Heads-up:** the repo also contains an unrelated second project in `reelmint/`
-> (an AI content studio). It has its own `package.json`, server and deploy config,
-> and it is what the GitHub Actions CI (`.github/workflows/ci.yml`, "Reelmint CI")
-> actually builds. Don't confuse the two. See [The `reelmint/` subproject](#the-reelmint-subproject).
+This repo is **one project only**. Reelmint (an AI content studio) used to be
+embedded here in `reelmint/`; it now lives in its own repository. Nothing in this
+repo depends on it.
 
 ## Tech stack
 
@@ -155,7 +154,6 @@ server/
 marketing/                 static legal + marketing pages (privacy, terms, support, status) served at clean URLs
 public/                    favicon, PWA manifest, app icons
 resources/                 store assets (icons, splash, feature graphic)
-reelmint/                  SEPARATE project — see below
 ```
 
 ## Key conventions
@@ -246,24 +244,13 @@ Deeper operational docs live in the repo root: `DEPLOYMENT.md` (Play Store),
 `DEPLOY_WEBSITE.md` (website + API), `PRICING.md`, `COMPLIANCE.md`, `VERIFY.md`,
 `LAUNCH_RUNBOOK.md`, `CHECKLIST.md`.
 
-## The `reelmint/` subproject
+## CI
 
-`reelmint/` is a **standalone, unrelated** application that happens to live in this
-repo. It is a single-service AI content studio (Express API + static web app, **no
-build step**) that turns a prompt into videos/images/copy.
-
-- Its own `reelmint/package.json`, `reelmint/render.yaml`, `reelmint/.env.example`.
-- Uses the **`@anthropic-ai/sdk`** directly (not the proxy pattern above) with a
-  default model of `claude-opus-4-8`, and runs in a clickable **demo mode** when
-  `ANTHROPIC_API_KEY` is unset.
-- Run it with `cd reelmint && npm install && npm start`.
-- **`.github/workflows/ci.yml` targets `reelmint/` only** — it installs, `node --check`s
-  and smoke-tests the reelmint server. The Education Academy app is covered separately
-  by `.github/workflows/main-ci.yml` (audit → `npm test` → syntax-check → all three
-  builds → API smoke test).
-
-Treat changes to `reelmint/` and to the main app as independent. Don't cross-import
-between them.
+`.github/workflows/main-ci.yml` ("Main App CI") is the only workflow in this repo:
+`npm ci` → audit runtime deps (fails on high/critical) → full audit (report only) →
+`npm test` → `node --check` on the server → build web/app/onefile → API smoke test in
+demo mode. Match it locally before pushing: tests green, audit clean, all three builds
+succeeding.
 
 ## Working here — quick checklist
 
