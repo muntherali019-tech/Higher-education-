@@ -35,7 +35,7 @@ before(async () => {
   proc = spawn(process.execPath, [path.join(ROOT, "server", "index.js")], {
     cwd: workDir,
     // Strip the inherited AI/Stripe keys so the suite is deterministic wherever it runs.
-    env: { ...process.env, PORT: String(PORT), ANTHROPIC_API_KEY: "", STRIPE_SECRET_KEY: "" },
+    env: { ...process.env, PORT: String(PORT), ANTHROPIC_API_KEY: "", STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "" },
     stdio: "ignore",
   });
   for (let i = 0; i < 40; i++) {
@@ -196,6 +196,32 @@ test("checkout rejects an unknown plan before touching Stripe", async () => {
   // Stripe isn't configured in tests, so a valid plan would 503; an unknown
   // plan is rejected regardless. Either way it must never 200.
   assert.ok(r.status === 400 || r.status === 503);
+});
+
+// The webhook is the source of truth for entitlements, so it must fail closed.
+// It used to return true when STRIPE_WEBHOOK_SECRET was unset, which meant an
+// unsigned POST naming your own uid granted you a paid plan for free.
+test("the Stripe webhook rejects unsigned events instead of granting a plan", async () => {
+  const signup = await api("POST", "/api/auth/signup", {
+    body: { email: "webhook-victim@example.com", password: "longenough1", name: "Victim" },
+  });
+  assert.equal(signup.status, 200);
+  const { id } = signup.body.user;
+
+  const res = await fetch(`${BASE}/api/stripe/webhook`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "checkout.session.completed",
+      data: { object: { id: "cs_forged", metadata: { uid: id, plan: "family" } } },
+    }),
+  });
+  assert.equal(res.status, 400);
+
+  const me = await api("GET", "/api/me", { token: signup.body.token });
+  assert.equal(me.body.user.subs.family, undefined);
+  assert.equal(me.body.user.subs.junior, false);
+  assert.equal(me.body.user.subs.adult, false);
 });
 
 test("unknown API paths do not fall through to the SPA shell", async () => {

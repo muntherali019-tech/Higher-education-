@@ -515,6 +515,8 @@ app.get("/api/admin/funnel", (req, res) => {
 /* ---------- Stripe (web build payments) ---------- */
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY || "";
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+// How far a webhook's signed timestamp may drift before we reject it (seconds).
+const STRIPE_WEBHOOK_TOLERANCE = Number(process.env.STRIPE_WEBHOOK_TOLERANCE || 300);
 const STRIPE_PRICES = {
   junior: process.env.STRIPE_PRICE_JUNIOR || "",
   adult: process.env.STRIPE_PRICE_ADULT || "",
@@ -582,11 +584,17 @@ app.post("/api/stripe/portal", async (req, res) => {
 });
 
 /* ---------- Stripe webhook handling (verifies signature, then grants/revokes) ---------- */
-function verifyStripeSig(rawBuf, sigHeader) {
-  if (!STRIPE_WEBHOOK_SECRET) return true;                 // not enforced until you set the secret (dev/local)
+function verifyStripeSig(rawBuf, sigHeader, now = Date.now()) {
+  // Fail closed. This used to return true when no secret was configured, which meant
+  // any unsigned POST to /api/stripe/webhook was processed — enough to grant yourself
+  // a paid plan by naming your own uid in the payload.
+  if (!STRIPE_WEBHOOK_SECRET) return false;
   if (!sigHeader) return false;
   const parts = Object.fromEntries(String(sigHeader).split(",").map((kv) => kv.split("=")));
   if (!parts.t || !parts.v1) return false;
+  // Stripe signs `t.payload`, so without a freshness check a captured delivery replays forever.
+  const ts = Number(parts.t);
+  if (!Number.isFinite(ts) || Math.abs(now / 1000 - ts) > STRIPE_WEBHOOK_TOLERANCE) return false;
   const signed = `${parts.t}.${rawBuf.toString("utf8")}`;
   const expected = crypto.createHmac("sha256", STRIPE_WEBHOOK_SECRET).update(signed).digest("hex");
   try { return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1)); } catch { return false; }
@@ -732,9 +740,23 @@ if (fs.existsSync(WEB_DIR)) {
   app.get("*", (req, res, next) => { if (req.path.startsWith("/api/")) return next(); res.sendFile(path.join(WEB_DIR, "index.html")); });
 }
 
+// Payments fail silently when only half the Stripe config is present: checkout
+// succeeds, the webhook rejects, and nobody notices until a customer has paid and
+// still has no access. Say so at boot instead.
+function stripeConfigWarnings() {
+  if (!STRIPE_SECRET) return ["Stripe is off — /api/stripe/checkout returns 503. Set STRIPE_SECRET_KEY to take payments."];
+  const warn = [];
+  if (!STRIPE_WEBHOOK_SECRET) warn.push("STRIPE_SECRET_KEY is set but STRIPE_WEBHOOK_SECRET is not — the webhook rejects every event, so paid customers will NOT be granted access.");
+  const missing = Object.keys(STRIPE_PRICES).filter((k) => !STRIPE_PRICES[k]);
+  if (missing.length) warn.push(`No price id for: ${missing.join(", ")} — checkout 400s for those plans (set STRIPE_PRICE_*).`);
+  if (!process.env.PUBLIC_WEB_URL) warn.push(`PUBLIC_WEB_URL is unset — after paying, customers are redirected to ${SITE_URL}.`);
+  return warn;
+}
+
 initStore().then(() => {
   app.listen(PORT, () => {
     console.log(`\n  Education Academy API ready on http://localhost:${PORT}`);
     if (!KEY) console.log("  ⚠  No ANTHROPIC_API_KEY found — AI features will error until you add one to .env\n");
+    for (const w of stripeConfigWarnings()) console.log(`  ⚠  ${w}`);
   });
 }).catch((e) => { console.error("Failed to start:", e); process.exit(1); });
