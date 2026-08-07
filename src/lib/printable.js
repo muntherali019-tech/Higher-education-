@@ -10,15 +10,15 @@ function openPrint(inner, title = "Education Academy") {
     `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
       *{box-sizing:border-box} body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:#3A2A22;padding:28px}
       .cert{background:linear-gradient(135deg,#FFFDF6,#FFF3DC);border:8px double #FF8A47;border-radius:16px;padding:40px 32px;text-align:center;max-width:720px;margin:0 auto}
-      .cert .seal{font-size:60px} .cert h1{font-family:Georgia,serif;font-size:30px;margin:8px 0 0} .cert .sub{color:#8a766c;font-weight:700;margin-top:4px}
-      .cert .who{font-size:30px;color:#6b4fb0;margin:22px 0 4px;font-weight:800} .cert .for{color:#8a766c}
+      .cert .seal{font-size:60px} .cert h1{font-family:Georgia,serif;font-size:30px;margin:8px 0 0} .cert .sub{color:#756055;font-weight:700;margin-top:4px}
+      .cert .who{font-size:30px;color:#6b4fb0;margin:22px 0 4px;font-weight:800} .cert .for{color:#756055}
       .cert .stats{display:flex;justify-content:center;gap:34px;flex-wrap:wrap;margin:22px 0 6px;font-weight:700}
-      .cert .stats b{display:block;font-size:26px;color:#F26B2A} .cert .sig{margin-top:26px;color:#8a766c;font-weight:700;font-size:13px}
+      .cert .stats b{display:block;font-size:26px;color:#B84A0D} .cert .sig{margin-top:26px;color:#756055;font-weight:700;font-size:13px}
       .ws{max-width:720px;margin:0 auto} .ws header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:3px solid #FF8A47;padding-bottom:8px}
-      .ws h1{font-size:24px;margin:0} .ws .meta{color:#8a766c;font-weight:700;font-size:13px} .ws .instr{color:#5a463c;margin:12px 0}
+      .ws h1{font-size:24px;margin:0} .ws .meta{color:#756055;font-weight:700;font-size:13px} .ws .instr{color:#5a463c;margin:12px 0}
       .ws ol{padding-left:22px} .ws li{margin:16px 0;font-weight:600} .ws .rule{border-bottom:1px dashed #cbb89f;height:22px;margin-top:8px}
-      .ws .key{margin-top:28px;border-top:2px solid #eadfce;padding-top:10px;color:#8a766c;font-size:13px}
-      .ws .key b{color:#3A2A22} .brand{text-align:center;color:#b09a86;font-size:12px;margin-top:24px}
+      .ws .key{margin-top:28px;border-top:2px solid #eadfce;padding-top:10px;color:#756055;font-size:13px}
+      .ws .key b{color:#3A2A22} .brand{text-align:center;color:#7d6a60;font-size:12px;margin-top:24px}
       @media print{@page{margin:14mm}}
     </style></head><body>${inner}<div class="brand">🐱 Education Academy · educationacademy.app</div></body></html>`;
   const f = document.createElement("iframe");

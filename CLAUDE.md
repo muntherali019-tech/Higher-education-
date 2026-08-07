@@ -183,6 +183,13 @@ reelmint/                  SEPARATE project — see below
   registered in the `STRINGS` array in `src/lib/i18n.js` to be translated. AI-generated
   content (quizzes, feedback, lessons) is generated directly in the chosen language via
   a `language` argument to the `api.js` functions.
+- **Colour tokens and contrast.** The palette lives in `:root` in `src/styles.css`.
+  The bright brand tokens (`--ginger`, `--sky`, `--bad`, `--purple`) are for fills,
+  borders and icons; **text on a light background must use the `--*-text` variant**
+  (`--ginger-text`, `--sky-text`, `--bad-text`, or `--purple-deep`) so it clears WCAG
+  AA 4.5:1. `test/contrast.test.js` reads the tokens back out of the stylesheet and
+  fails if a pair regresses — add new pairs there when you add a colour.
+  `src/lib/printable.js` inlines its own copy of the palette; keep the two in step.
 - **Secrets stay server-side.** Never put the Anthropic, ElevenLabs or Stripe secret
   keys in frontend code or `VITE_*` vars. `VITE_*` values are public (baked into the
   bundle); everything else is read by the server from the environment.
