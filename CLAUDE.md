@@ -232,6 +232,16 @@ reelmint/                  SEPARATE project — see below
   — `userFromReq()` refuses any token issued before that, so changing a leaked
   password signs out every other session. The route returns a fresh token; the
   client must store it or its next request 401s.
+- **The dormant-account sweep cannot check passwords, and never will.**
+  They are stored as `scrypt(password, per-user salt)`; Have I Been Pwned needs
+  the SHA-1 of the *plaintext*. There is no path between the two, which is the
+  point of hashing — anything that could test a stored password would mean
+  keeping it reversibly, a far worse problem. So `runPasswordSweep()` reports
+  which accounts have never been examined (`pwCheckedAt`, stamped at signup,
+  login and change) and, under `PASSWORD_SWEEP=1`, emails those owners to come
+  and sign in — converting an unknowable account into a known one is the most
+  anyone can offer. Reporting is always on; only the email is gated, and each
+  account is prompted at most once per `PASSWORD_SWEEP_INTERVAL_DAYS`.
 - **Rate limiting:** `rateLimit(max, windowMs)` in `server/index.js` is a
   dependency-free fixed-window limiter keyed on IP + path. `authLimit` (10 per
   15 min) guards signup/login against brute force; `aiLimit` (30 per 5 min)
