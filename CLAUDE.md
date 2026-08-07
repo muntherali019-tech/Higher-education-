@@ -66,6 +66,7 @@ the AI/Stripe keys stripped.
 | `src/lib/*.test.js` | client logic under jsdom: progress, api, achievements, trial, examCache, mochiShop, recognition |
 | `server/*.test.js` | auth and store units under node |
 | `test/server.test.js` | the API over real HTTP: auth (incl. the password minimum), rate limiting, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
+| `test/password-change.test.js` | the login weak-password warning, the change-password route, and that a change signs out older sessions |
 | `test/proxy.test.js` | `TRUST_PROXY`: forwarded clients get separate rate-limit budgets, and a spoofed `X-Forwarded-For` cannot buy a fresh one |
 | `test/ratelimit-shared.test.js` | two server instances against one Postgres share a rate-limit window (needs `TEST_DATABASE_URL`; CI provides it, otherwise skipped) |
 | `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
@@ -221,6 +222,16 @@ reelmint/                  SEPARATE project — see below
   needed, and it **fails open** — an HIBP outage must never block a signup,
   and the local blocklist has already run. `fetchImpl` is injectable so tests
   never hit the network.
+- **Existing accounts are covered at login, not just at signup.** `/api/auth/login`
+  runs `checkPassword()` on the credential it was handed and returns a
+  `passwordWarning` alongside the token. It **never blocks the sign-in** — a
+  breach hit is a prompt, not proof this account is compromised, and locking
+  someone out of the only screen that can fix it helps nobody. The portal shows
+  it as an advisory banner. `PUT /api/me/password` requires the current
+  password, applies the same policy to the new one, and sets `user.pwChangedAt`
+  — `userFromReq()` refuses any token issued before that, so changing a leaked
+  password signs out every other session. The route returns a fresh token; the
+  client must store it or its next request 401s.
 - **Rate limiting:** `rateLimit(max, windowMs)` in `server/index.js` is a
   dependency-free fixed-window limiter keyed on IP + path. `authLimit` (10 per
   15 min) guards signup/login against brute force; `aiLimit` (30 per 5 min)
