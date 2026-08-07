@@ -62,11 +62,30 @@ test("health endpoint reports that no AI key is configured", async () => {
   assert.equal(r.body.hasKey, false);
 });
 
-test("signup rejects missing fields and bad roles", async () => {
+test("signup rejects missing fields, short passwords and bad roles", async () => {
   const missing = await api("POST", "/api/auth/signup", { body: { email: "nopass@example.com" } });
   assert.equal(missing.status, 400);
+  // 7 characters — one short of the minimum, so this pins the boundary rather
+  // than just "some short string".
+  const short = await api("POST", "/api/auth/signup", { body: { email: "short@example.com", password: "sevench" } });
+  assert.equal(short.status, 400);
+  assert.match(short.body.error, /at least 8/);
+  // Long enough, but the single most guessed password there is. The strength
+  // rules are unit-tested in password.test.js; this pins that the route actually
+  // consults them.
+  const common = await api("POST", "/api/auth/signup", { body: { email: "common@example.com", password: "P@ssw0rd" } });
+  assert.equal(common.status, 400);
+  assert.match(common.body.error, /too easy to guess/);
   const badRole = await api("POST", "/api/auth/signup", { body: { email: "role@example.com", password: "longenough1", role: "admin" } });
   assert.equal(badRole.status, 400);
+});
+
+test("signup accepts a password of exactly the minimum length", async () => {
+  // The address deliberately shares nothing with the password: "eightch@…" would
+  // be refused, correctly, for being the email local part plus a letter.
+  const r = await api("POST", "/api/auth/signup", { body: { email: "minlen@example.com", password: "eightchr" } });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.token);
 });
 
 test("parents and teachers can sign up and receive tokens", async () => {
@@ -201,4 +220,30 @@ test("checkout rejects an unknown plan before touching Stripe", async () => {
 test("unknown API paths do not fall through to the SPA shell", async () => {
   const res = await fetch(`${BASE}/api/definitely-not-a-route`);
   assert.notEqual(res.status, 200);
+});
+
+test("login is rate-limited after repeated attempts", async () => {
+  // 2 logins used earlier; the limiter allows 10 per 15 min, so the 11th 429s.
+  let limited = null;
+  for (let i = 0; i < 9; i++) {
+    const r = await api("POST", "/api/auth/login", { body: { email: "parenta@example.com", password: "wrongpassword" } });
+    if (r.status === 429) { limited = { attempt: i + 3, ...r }; break; }
+    assert.equal(r.status, 401);
+  }
+  assert.ok(limited, "rate limiter never triggered");
+  assert.equal(limited.attempt, 11, "the 11th login attempt should be limited");
+  assert.match(limited.body.error, /Too many requests/);
+});
+
+test("the open AI proxy is rate-limited so a live key cannot be drained", async () => {
+  // /api/claude takes no token by design, so the limiter is the only thing
+  // between an anonymous caller and the paid upstream. Budget is 30 per 5 min
+  // per IP; a couple were spent earlier, so loop past that rather than pinning
+  // an exact attempt number.
+  let limited = false;
+  for (let i = 0; i < 40; i++) {
+    const r = await api("POST", "/api/claude", { body: { content: "hi" } });
+    if (r.status === 429) { limited = true; break; }
+  }
+  assert.ok(limited, "AI proxy rate limiter never triggered");
 });

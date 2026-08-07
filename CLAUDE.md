@@ -31,10 +31,9 @@ orientation map for changing the code.
 - **Data:** a JSON file store by default, optionally Postgres (`server/store.js`).
 - **State (client):** React hooks + `localStorage` (keys prefixed `whisker.`).
 
-Tests use **Node's built-in `node:test`** runner (`npm test`) — no Jest/Vitest and no
-extra test dependencies. There is still **no linter/formatter** configured. Anything
-the suite doesn't cover (the React UI in particular) is verified by running the dev
-server and exercising the flow by hand, plus `node --check` on server files.
+Tests run on **two runners**, both under `npm test`: **Vitest** for `src/` (jsdom)
+and `server/` (node) specs, and **Node's built-in `node:test`** for the HTTP suites
+in `test/`. There is still **no linter/formatter** configured.
 
 ## Common commands
 
@@ -57,15 +56,34 @@ npm run cap:sync       # build:app + copy assets into the android/ project
 npm run cap:open       # open Android Studio
 ```
 
-`npm test` runs four suites in `test/` (no keys or network needed — it boots the real
-server in a temp directory with the AI/Stripe keys stripped):
+`npm test` runs `vitest run` then the `node:test` suites in `test/`. No keys or
+network are needed — the HTTP suites boot the real server in a temp directory with
+the AI/Stripe keys stripped.
 
 | Suite | Covers |
 |---|---|
-| `server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
-| `plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
-| `progress.test.js` | `src/lib/progress.js` — stars, streaks, freezes, rounds, daily goal |
-| `bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
+| `src/App.test.jsx` | **render smoke tests** — mounts the shell and asserts real UI, not the crash screen (see below) |
+| `src/lib/*.test.js` | client logic under jsdom: progress, api, achievements, trial, examCache, mochiShop, recognition |
+| `server/*.test.js` | auth and store units under node |
+| `test/server.test.js` | the API over real HTTP: auth (incl. the password minimum), rate limiting, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
+| `test/password-change.test.js` | the login weak-password warning, the change-password route, and that a change signs out older sessions |
+| `test/proxy.test.js` | `TRUST_PROXY`: forwarded clients get separate rate-limit budgets, and a spoofed `X-Forwarded-For` cannot buy a fresh one |
+| `test/ratelimit-shared.test.js` | two server instances against one Postgres share a rate-limit window (needs `TEST_DATABASE_URL`; CI provides it, otherwise skipped) |
+| `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
+| `test/progress.test.js` | stars, streaks, freezes, rounds, daily goal |
+| `test/bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
+
+**Keep `src/App.test.jsx` passing, and add to it when you touch the shell.** A
+`ReferenceError: Cannot access 'onboard' before initialization` once shipped to
+`main` with a fully green build: every suite covered the Express API or pure logic
+and nothing mounted `App`, so the app rendered nothing but the `ErrorBoundary`
+fallback on every load while CI stayed green. Those tests mount the shell exactly
+the way `src/main.jsx` does and fail on anything that throws during render.
+
+A related trap that file guards against: **declare state above the effects that
+read it.** Dependency arrays are evaluated during render at their position in the
+component body, so a `const` declared further down puts the variable in the
+temporal dead zone and throws on first mount.
 
 To sanity-check the server without a browser: `node --check server/index.js` and hit
 `GET /api/health`.
@@ -193,6 +211,66 @@ reelmint/                  SEPARATE project — see below
 - **Auth pattern:** wrap protected routes in the `auth(handler)` helper in
   `server/index.js`; it resolves the bearer token to a user and 401s otherwise.
   `pub(user)` is the only shape sent to the client (never leak `salt`/`hash`).
+  Signup enforces password strength server-side via `passwordProblem()` in
+  `server/password.js` — the client hint is a courtesy, never the check. That
+  module follows **NIST SP 800-63B**: a length floor plus a blocklist of common
+  and context-specific passwords, and deliberately **no** composition rules
+  (uppercase/digit/symbol requirements push people to `Password1!` and are
+  explicitly discouraged). Add new blocked words to `COMMON` there. It also checks the **Have I Been Pwned** corpus when
+  `PWNED_PASSWORDS` is set (`render.yaml` turns it on in production): only the
+  first 5 chars of the SHA-1 leave the process (k-anonymity), no API key is
+  needed, and it **fails open** — an HIBP outage must never block a signup,
+  and the local blocklist has already run. `fetchImpl` is injectable so tests
+  never hit the network.
+- **Existing accounts are covered at login, not just at signup.** `/api/auth/login`
+  runs `checkPassword()` on the credential it was handed and returns a
+  `passwordWarning` alongside the token. It **never blocks the sign-in** — a
+  breach hit is a prompt, not proof this account is compromised, and locking
+  someone out of the only screen that can fix it helps nobody. The portal shows
+  it as an advisory banner. `PUT /api/me/password` requires the current
+  password, applies the same policy to the new one, and sets `user.pwChangedAt`
+  — `userFromReq()` refuses any token issued before that, so changing a leaked
+  password signs out every other session. The route returns a fresh token; the
+  client must store it or its next request 401s.
+- **The dormant-account sweep cannot check passwords, and never will.**
+  They are stored as `scrypt(password, per-user salt)`; Have I Been Pwned needs
+  the SHA-1 of the *plaintext*. There is no path between the two, which is the
+  point of hashing — anything that could test a stored password would mean
+  keeping it reversibly, a far worse problem. So `runPasswordSweep()` reports
+  which accounts have never been examined (`pwCheckedAt`, stamped at signup,
+  login and change) and, under `PASSWORD_SWEEP=1`, emails those owners to come
+  and sign in — converting an unknowable account into a known one is the most
+  anyone can offer. Reporting is always on; only the email is gated, and each
+  account is prompted at most once per `PASSWORD_SWEEP_INTERVAL_DAYS`.
+- **Rate limiting:** `rateLimit(max, windowMs)` in `server/index.js` is a
+  dependency-free fixed-window limiter keyed on IP + path. `authLimit` (10 per
+  15 min) guards signup/login against brute force; `aiLimit` (30 per 5 min)
+  guards `/api/claude` and `/api/tts`, which take **no token** by design — the
+  limiter is the only thing between an anonymous caller and the paid upstream.
+  Budgets are per path, so a test file's signup and login allowances are
+  separate; `server.test.js` spends 8 signups and deliberately exhausts login.
+  **Counters are shared across instances when `DATABASE_URL` is set** —
+  `rateLimitHit()` in `store.js` does the whole fixed-window step in one
+  `INSERT … ON CONFLICT` so concurrent instances can't both read the same count
+  and each allow a request. Without Postgres (or if a query fails) the limiter
+  falls back to this process's own counters, which bounds N instances at N×
+  the rate rather than dropping the limit entirely.
+- **Schema DDL runs under an advisory lock — keep it that way.** `CREATE TABLE
+  IF NOT EXISTS` is *not* atomic in Postgres: the check and the create are
+  separate steps, so instances booting together (every deploy and scale-up) can
+  both find a table missing and one dies on a duplicate `pg_type` row. The loser
+  then fell through to the **file store** and served its own private copy of the
+  data while looking healthy. `ensureSchema()` in `store.js` wraps all DDL in a
+  transaction holding `pg_advisory_xact_lock`. Add new tables there, not as
+  loose `pool.query` calls.
+- **`TRUST_PROXY` is load-bearing for the limiter.** It is keyed on `req.ip`,
+  which behind Render's TLS-terminating proxy is the *proxy's* address unless
+  Express is told how many hops to trust — so leaving it unset in production
+  puts every visitor in one bucket and the 11th login site-wide locks everyone
+  out. Setting it when there is **no** proxy is the opposite failure: callers
+  can spoof `X-Forwarded-For` and get a fresh bucket per request. `render.yaml`
+  sets it to 1; leave it unset locally. `test/proxy.test.js` pins both
+  directions.
 
 ## Monetisation & premium features
 
