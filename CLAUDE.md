@@ -118,6 +118,27 @@ routing/translation calls. The server (`server/index.js`) enforces an
 (`ANTHROPIC_MODEL` env, default `claude-sonnet-5`) — so change model choices in
 those two places, never hard-code an id elsewhere.
 
+### API hardening
+
+`server/index.js` carries a hand-rolled, dependency-free protection layer in front
+of the paid upstreams. Don't regress it — `test/server.test.js` covers the limits:
+
+- **Rate limits**, fixed window, in memory, keyed on `req.ip` + `req.path`:
+  `aiLimit` (30 requests / 5 min, default) on `/api/claude` and `/api/tts`;
+  `authLimit` (10 / 15 min) on signup and login. Both are env-tunable via
+  `RATE_LIMIT_AI_MAX` / `RATE_LIMIT_AUTH_MAX`. Counts are per process, so a
+  multi-instance deploy multiplies the effective limit.
+- **`TRUST_PROXY`** must be set behind Render/Cloudflare or every visitor shares
+  the proxy's address and one user throttles everyone. Leave it unset when clients
+  connect directly — trusting `X-Forwarded-For` there lets callers spoof an IP for
+  a fresh allowance.
+- **CORS** is wide open unless `CORS_ORIGIN` is set (comma-separated allowlist).
+  **Set it in production.**
+- Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`) on every response; `x-powered-by` disabled.
+- A model **allow-list** (`ALLOWED_MODELS`) on the AI proxy so a compromised
+  client can't point the key at an arbitrary or expensive model.
+
 `src/lib/api.js` reads `import.meta.env.VITE_API_BASE` (falling back to `/api`),
 so a production mobile build points at a deployed backend URL. In dev, Vite proxies
 `/api` → `http://localhost:8787` (see `vite.config.js`).
@@ -236,6 +257,10 @@ them — but don't treat them as live code.
 - **Auth pattern:** wrap protected routes in the `auth(handler)` helper in
   `server/index.js`; it resolves the bearer token to a user and 401s otherwise.
   `pub(user)` is the only shape sent to the client (never leak `salt`/`hash`).
+- **Rate-limit anything that spends money.** `/api/claude` and `/api/tts` carry
+  `aiLimit`, and the auth routes carry `authLimit` (see below). A new route that
+  reaches a paid upstream must get `aiLimit` too — it is applied per route, so
+  forgetting it leaves the endpoint unlimited.
 - **Child-safety/privacy:** homework and scan photos live in component memory only
   (never persisted or synced). No third-party trackers. Account deletion cascades.
   Keep it that way.
