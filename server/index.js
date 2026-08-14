@@ -14,7 +14,45 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 dotenv.config();
 
 const app = express();
-app.use(cors());
+// Behind a proxy (Render), set TRUST_PROXY so req.ip is the real client address.
+// Without it every visitor shares the proxy's IP, so one busy user's rate limit
+// throttles the whole site. Leave unset when clients connect directly — trusting
+// X-Forwarded-For there lets callers spoof their IP for a fresh allowance.
+if (process.env.TRUST_PROXY) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
+app.disable("x-powered-by");
+// Lock CORS to your site in production by setting CORS_ORIGIN (comma-separated for several).
+// Unset keeps the previous wide-open behaviour, which is fine for local dev only.
+const corsOrigins = (process.env.CORS_ORIGIN || "").split(",").map((s) => s.trim()).filter(Boolean);
+app.use(cors(corsOrigins.length ? { origin: corsOrigins } : {}));
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
+
+// Tiny fixed-window rate limiter (in-memory, per IP + route) — protects the paid AI/TTS
+// proxies and the auth endpoints without adding a dependency. For multi-instance deploys
+// move this to a shared store (Redis) or a gateway limit.
+const rateBuckets = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, b] of rateBuckets) if (b.reset <= now) rateBuckets.delete(k); }, 60000).unref();
+const rateLimit = (max, windowMs) => (req, res, next) => {
+  const key = `${req.ip}|${req.path}`;
+  const now = Date.now();
+  let b = rateBuckets.get(key);
+  if (!b || b.reset <= now) { b = { count: 0, reset: now + windowMs }; rateBuckets.set(key, b); }
+  if (++b.count > max) {
+    res.setHeader("Retry-After", Math.ceil((b.reset - now) / 1000));
+    return res.status(429).json({ error: "Too many requests — please wait a moment and try again." });
+  }
+  next();
+};
+// Env-tunable so a busy deploy can raise them and the test suite (which drives the
+// whole API from one address) can lift them out of the way.
+const rateMax = (name, fallback) => Number(process.env[name]) || fallback;
+const aiLimit = rateLimit(rateMax("RATE_LIMIT_AI_MAX", 30), 5 * 60000);      // 30 AI/TTS calls per 5 min per IP
+const authLimit = rateLimit(rateMax("RATE_LIMIT_AUTH_MAX", 10), 15 * 60000); // 10 auth attempts per 15 min per IP
+
 // Stripe webhook must read the RAW body for signature verification, so it is registered
 // before express.json(). Verifies the signature, then grants/revokes access in the store.
 app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), (req, res) => handleStripeEvent(req.body, req.headers["stripe-signature"], res));
@@ -35,7 +73,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true, hasKey: Boolean(KEY) 
 // means a compromised client can't point our key at an arbitrary/expensive model.
 const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 const ALLOWED_MODELS = new Set(["claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5-20251001"]);
-app.post("/api/claude", async (req, res) => {
+app.post("/api/claude", aiLimit, async (req, res) => {
   if (!KEY) return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY. Copy .env.example to .env and add your key." });
   try {
     const { system, content, max_tokens = 1500 } = req.body || {};
@@ -51,7 +89,7 @@ app.post("/api/claude", async (req, res) => {
 });
 
 /* ---------- premium voice proxy (ElevenLabs) — keeps the TTS key server-side ---------- */
-app.post("/api/tts", async (req, res) => {
+app.post("/api/tts", aiLimit, async (req, res) => {
   if (!ELEVEN_KEY) return res.status(500).json({ error: "Missing ELEVENLABS_API_KEY. Add it to .env to enable the premium voice." });
   try {
     const { text } = req.body || {};
@@ -115,7 +153,7 @@ const auth = (handler) => (req, res) => {
 };
 
 /* ---------- auth ---------- */
-app.post("/api/auth/signup", (req, res) => {
+app.post("/api/auth/signup", authLimit, (req, res) => {
   const { email, password, role = "parent", name = "" } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: "Email and password are required." });
   if (!["parent", "teacher"].includes(role)) return res.status(400).json({ error: "Invalid role." });
@@ -136,7 +174,7 @@ app.post("/api/auth/signup", (req, res) => {
   res.json({ token: signToken({ uid: user.id }), user: pub(user) });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", authLimit, (req, res) => {
   const { email, password } = req.body || {};
   const db = load();
   const user = Object.values(db.users).find((u) => u.email.toLowerCase() === String(email || "").toLowerCase());

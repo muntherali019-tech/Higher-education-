@@ -202,3 +202,29 @@ test("unknown API paths do not fall through to the SPA shell", async () => {
   const res = await fetch(`${BASE}/api/definitely-not-a-route`);
   assert.notEqual(res.status, 200);
 });
+
+// Kept last on purpose: it deliberately exhausts the login budget for this IP,
+// so anything added after it would see 429s.
+test("the AI proxy is rate limited", async () => {
+  // The proxy spends real money per call, so an unauthenticated flood must be
+  // cut off. The limiter keys on IP+path, and no earlier test touches this route
+  // enough to matter, so we should reach the ceiling well inside this loop.
+  let limited = false;
+  for (let i = 0; i < 40; i++) {
+    const r = await api("POST", "/api/claude", { body: { content: "hi" } });
+    if (r.status === 429) { limited = true; break; }
+  }
+  assert.ok(limited, "the AI proxy never rate-limited a flood of requests");
+});
+
+test("repeated failed logins are rate limited", async () => {
+  let limited = false;
+  for (let i = 0; i < 20; i++) {
+    const r = await api("POST", "/api/auth/login", {
+      body: { email: "nobody@example.com", password: "wrongpassword" },
+    });
+    if (r.status === 429) { limited = true; break; }
+    assert.equal(r.status, 401, "a wrong password is rejected until the limiter kicks in");
+  }
+  assert.ok(limited, "credential stuffing was never rate-limited");
+});

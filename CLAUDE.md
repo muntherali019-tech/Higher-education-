@@ -4,37 +4,35 @@ Guidance for AI assistants (and humans) working in this repository.
 
 ## What this is
 
-**Education Academy** (internal package name `whisker-academy`) — a cat-themed
+**Education Academy** (internal package name `education-academy`) — a cat-themed
 learning game for UK learners, hosted by **Mochi** the ginger cat. It covers four
 stages (Key Stage 1, 2, 3 and Higher Education) with AI-generated quiz rounds,
 homework photo-marking, a scan-and-solve helper, an AI language teacher, vocational
-exam-prep courses, subscriptions, and a parent/teacher portal.
+exam-prep courses, printable worksheets, gift subscriptions, subscriptions, and a
+parent/teacher portal.
 
-The user-facing README is aimed at people shipping the app; this file is the
-orientation map for changing the code.
+This is the **canonical** repo for the app (it backs the live site). The sibling
+`relic-run` repo is a deprecated working copy — don't port changes back to it.
 
-> **Heads-up:** the repo also contains an unrelated second project in `reelmint/`
-> (an AI content studio). It has its own `package.json`, server and deploy config,
-> and it is what the GitHub Actions CI (`.github/workflows/ci.yml`, "Reelmint CI")
-> actually builds. Don't confuse the two. See [The `reelmint/` subproject](#the-reelmint-subproject).
+`README.md` is aimed at people shipping the app; this file is the orientation map
+for changing the code.
 
 ## Tech stack
 
-- **Frontend:** React 18 + Vite 5, plain JavaScript (JSX, **no TypeScript**), ESM
+- **Frontend:** React 18 + Vite 8, plain JavaScript (JSX, **no TypeScript**), ESM
   everywhere (`"type": "module"`). Icons from `lucide-react`. Styling is a single
   hand-written `src/styles.css` using CSS custom properties (e.g. `var(--ginger)`);
   there is no CSS framework or CSS-in-JS.
-- **Backend:** a small **Express** server (`server/index.js`) that proxies the
-  Anthropic API (keeping the key server-side), plus accounts, cross-device sync,
-  classes, goals, weekly emails and Stripe payments.
+- **Backend:** a small **Express** server (`server/index.js`, ~740 lines, 44 routes)
+  that proxies the Anthropic API (keeping the key server-side), plus accounts,
+  cross-device sync, classes, goals, weekly emails, anonymous analytics, gift codes
+  and Stripe payments.
 - **Mobile:** **Capacitor** wraps the web build into an Android app.
 - **Data:** a JSON file store by default, optionally Postgres (`server/store.js`).
 - **State (client):** React hooks + `localStorage` (keys prefixed `whisker.`).
-
-Tests use **Node's built-in `node:test`** runner (`npm test`) — no Jest/Vitest and no
-extra test dependencies. There is still **no linter/formatter** configured. Anything
-the suite doesn't cover (the React UI in particular) is verified by running the dev
-server and exercising the flow by hand, plus `node --check` on server files.
+- **Tests:** **Vitest** for co-located specs *and* Node's built-in `node:test` for
+  the suites in `test/`. `npm test` runs both (see [Testing](#testing)).
+- There is **no linter/formatter** configured.
 
 ## Common commands
 
@@ -45,7 +43,8 @@ npm start              # run web app (Vite :5173) + API (Express :8787) together
 npm run dev            # web front-end only (mode web), instant "mock" unlock for testing
 npm run dev:app        # front-end in app mode
 npm run server         # Express API only, on :8787
-npm test               # node:test — the full suite (run this before committing)
+npm test               # vitest run  &&  node --test "test/*.test.js"  — run before committing
+npm run test:watch     # vitest in watch mode (does not cover the node:test suites)
 
 npm run build          # == build:web  -> dist-web/
 npm run build:web      # website build (Stripe payments)          -> dist-web/
@@ -57,18 +56,47 @@ npm run cap:sync       # build:app + copy assets into the android/ project
 npm run cap:open       # open Android Studio
 ```
 
-`npm test` runs four suites in `test/` (no keys or network needed — it boots the real
-server in a temp directory with the AI/Stripe keys stripped):
+To sanity-check the server without a browser: `node --check server/index.js` and hit
+`GET /api/health`.
+
+## Testing
+
+`npm test` is two runners in sequence — **both must pass**, and `npm run test:watch`
+only covers the first:
+
+```
+vitest run                      # 9 files / ~97 tests — specs co-located with the code
+node --test "test/*.test.js"    # 4 files / ~39 tests — node:test suites in test/
+```
+
+**Vitest** config lives inside `vite.config.js` (not a separate `vitest.config.js`).
+It defines two *projects* because client code needs a DOM and server code must not
+have one — vitest 4 dropped `environmentMatchGlobs`, so the split is explicit:
+
+| Project | Environment | Includes |
+|---|---|---|
+| `client` | jsdom | `src/**/*.{test,spec}.{js,jsx}` |
+| `server` | node | `server/**/*.{test,spec}.{js,jsx}` |
+
+Shared setup (jest-dom matchers, `localStorage` reset) is `test/setup.js`. Current
+co-located specs: `src/lib/{progress,achievements,api,examCache,recognition,trial,mochiShop}.test.js`
+and `server/{auth,store}.test.js`.
+
+**node:test** suites in `test/` boot the real server in a temp directory with the
+AI/Stripe keys stripped — no keys or network needed:
 
 | Suite | Covers |
 |---|---|
-| `server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection |
-| `plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
-| `progress.test.js` | `src/lib/progress.js` — stars, streaks, freezes, rounds, daily goal |
-| `bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
+| `test/server.test.js` | the API over real HTTP: auth, child access control, goal scoping, classes/leaderboard, cascade deletes, the keyless AI proxy, checkout rejection, API 404s not falling through to the SPA shell |
+| `test/plans.test.js` | the `PLANS` catalog, `planForKs` and `grantPlan` entitlement rules |
+| `test/progress.test.js` | `src/lib/progress.js` — stars, streaks, freezes, rounds, daily goal |
+| `test/bank.test.js` | offline bank integrity: every stage/subject has a full, well-formed, non-repeating round |
 
-To sanity-check the server without a browser: `node --check server/index.js` and hit
-`GET /api/health`.
+Note `test/README.md` predates the current setup in places (it describes
+`environmentMatchGlobs`, which no longer exists) — trust `vite.config.js`.
+
+Anything the suites don't cover (the React UI in particular) is verified by running
+the dev server and exercising the flow by hand, plus `node --check` on server files.
 
 ## Architecture
 
@@ -84,11 +112,32 @@ Anthropic with the server-side key.
 **Model tiers.** The client picks the best model per task via `MODELS` in
 `src/lib/api.js`: `REASONING` (`claude-opus-4-8`) for homework marking and
 scan-and-solve, `SMART` (`claude-sonnet-5`, the default) for question/lesson/exam
-generation and tutor chat, and `FAST` (`claude-haiku-4-5`) for tiny
+generation and tutor chat, and `FAST` (`claude-haiku-4-5-20251001`) for tiny
 routing/translation calls. The server (`server/index.js`) enforces an
 **allow-list** (`ALLOWED_MODELS`) and falls back to `DEFAULT_MODEL`
 (`ANTHROPIC_MODEL` env, default `claude-sonnet-5`) — so change model choices in
 those two places, never hard-code an id elsewhere.
+
+### API hardening
+
+`server/index.js` carries a hand-rolled, dependency-free protection layer in front
+of the paid upstreams. Don't regress it — `test/server.test.js` covers the limits:
+
+- **Rate limits**, fixed window, in memory, keyed on `req.ip` + `req.path`:
+  `aiLimit` (30 requests / 5 min, default) on `/api/claude` and `/api/tts`;
+  `authLimit` (10 / 15 min) on signup and login. Both are env-tunable via
+  `RATE_LIMIT_AI_MAX` / `RATE_LIMIT_AUTH_MAX`. Counts are per process, so a
+  multi-instance deploy multiplies the effective limit.
+- **`TRUST_PROXY`** must be set behind Render/Cloudflare or every visitor shares
+  the proxy's address and one user throttles everyone. Leave it unset when clients
+  connect directly — trusting `X-Forwarded-For` there lets callers spoof an IP for
+  a fresh allowance.
+- **CORS** is wide open unless `CORS_ORIGIN` is set (comma-separated allowlist).
+  **Set it in production.**
+- Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`) on every response; `x-powered-by` disabled.
+- A model **allow-list** (`ALLOWED_MODELS`) on the AI proxy so a compromised
+  client can't point the key at an arbitrary or expensive model.
 
 `src/lib/api.js` reads `import.meta.env.VITE_API_BASE` (falling back to `/api`),
 so a production mobile build points at a deployed backend URL. In dev, Vite proxies
@@ -115,7 +164,7 @@ production build uses the real provider unless you force `VITE_BILLING=mock`.
 ```
 src/
   main.jsx                 React entry (wraps <App/> in <ErrorBoundary/>)
-  App.jsx                  the whole app shell — screen router, quiz flow, all top-level state (~1300 lines)
+  App.jsx                  the whole app shell — screen router, quiz flow, all top-level state (~1380 lines)
   styles.css               all styling (CSS custom properties, no framework)
   components/
     Mochi.jsx              the animated cat mascot
@@ -126,15 +175,17 @@ src/
     Worksheet.jsx          printable AI worksheet generator (premium revenue tool)
     Gift.jsx               gift-a-subscription screen (buy → redeemable code)
     ErrorBoundary.jsx      top-level crash guard -> friendly recoverable screen
+    screens/               ⚠ UNUSED — see "Dead code" below
   data/                    static content (no logic)
     curriculum.js          stages, subjects, topics, PLANS (incl. Family), grantPlan(), per-stage tutor prompts (tutorBrief)
     bank.js                offline fallback quiz questions
     courses.js             vocational course + module definitions
     languages.js           taught languages (BCP-47 codes, rtl flag) + fallback phrases
     demo.js                realistic sample learner + curated sample round for the live demo (not lorem)
-  lib/                     client logic, one concern per file
+  lib/                     client logic, one concern per file (specs live beside them as *.test.js)
     api.js                 ALL Anthropic calls + MODELS tiers (generateQuestions, markHomework, solveQuestion, askTutor, generateWorksheet, ...)
     progress.js            localStorage state, stats, streaks, daily goal (state key "whisker.v1")
+    analytics.js           privacy-first first-party funnel: whitelisted EVENTS only, no identifiers, honours DNT + local opt-out
     billing.js             purchases + gift codes (Stripe / RevenueCat / mock)
     printable.js           self-contained printable certificate + worksheet (hidden-iframe print)
     platform.js            web-vs-app build detection
@@ -147,16 +198,26 @@ src/
 
 server/
   index.js                 Express app: /api/claude proxy, /api/tts, auth, children/sync,
-                           goals, classes, leaderboard/referrals, weekly emails, Stripe
+                           goals, classes, leaderboard/referrals, analytics events, weekly
+                           emails, admin reports, gifts, Stripe; plus marketing pages,
+                           robots.txt and sitemap.xml
   store.js                 data layer — load()/save() over a JSON file OR Postgres (DATABASE_URL)
   auth.js                  password hashing + signed token helpers
   email.js                 weekly-email sending (console / Resend / SendGrid)
 
+test/                      node:test suites + shared vitest setup (see Testing)
 marketing/                 static legal + marketing pages (privacy, terms, support, status) served at clean URLs
 public/                    favicon, PWA manifest, app icons
 resources/                 store assets (icons, splash, feature graphic)
-reelmint/                  SEPARATE project — see below
 ```
+
+### Dead code — know before you edit
+
+`src/components/screens/` holds 15 extracted screen components that **nothing
+imports**. They arrived from a merge; `App.jsx` still renders every screen inline.
+Editing a file under `screens/` changes nothing the user sees. Either wire them up
+deliberately (a real refactor, verified by clicking through every screen) or delete
+them — but don't treat them as live code.
 
 ## Key conventions
 
@@ -183,6 +244,9 @@ reelmint/                  SEPARATE project — see below
   registered in the `STRINGS` array in `src/lib/i18n.js` to be translated. AI-generated
   content (quizzes, feedback, lessons) is generated directly in the chosen language via
   a `language` argument to the `api.js` functions.
+- **Analytics stay anonymous.** `src/lib/analytics.js` sends only a whitelisted event
+  *name* (`EVENTS`) — no personal data, no per-user id — and the server keeps daily
+  counts. Add new events to that set on both ends; anything unlisted is dropped.
 - **Secrets stay server-side.** Never put the Anthropic, ElevenLabs or Stripe secret
   keys in frontend code or `VITE_*` vars. `VITE_*` values are public (baked into the
   bundle); everything else is read by the server from the environment.
@@ -193,6 +257,13 @@ reelmint/                  SEPARATE project — see below
 - **Auth pattern:** wrap protected routes in the `auth(handler)` helper in
   `server/index.js`; it resolves the bearer token to a user and 401s otherwise.
   `pub(user)` is the only shape sent to the client (never leak `salt`/`hash`).
+- **Rate-limit anything that spends money.** `/api/claude` and `/api/tts` carry
+  `aiLimit`, and the auth routes carry `authLimit` (see below). A new route that
+  reaches a paid upstream must get `aiLimit` too — it is applied per route, so
+  forgetting it leaves the endpoint unlimited.
+- **Child-safety/privacy:** homework and scan photos live in component memory only
+  (never persisted or synced). No third-party trackers. Account deletion cascades.
+  Keep it that way.
 
 ## Monetisation & premium features
 
@@ -224,6 +295,23 @@ When adding a paid surface, gate it on `state.subs[...]`/`trial.trialActive()`,
 keep the Stripe/Play split in `billing.js`, and never trust the client for
 entitlement — the server webhook is the source of truth.
 
+## CI
+
+`.github/workflows/main-ci.yml` ("Main App CI") is the only workflow:
+
+`npm ci` → `npm audit --omit=dev --audit-level=high` (runtime deps gate the build)
+→ `npm audit || true` (full audit, report-only) → `npm test` → `node --check server/*.js`
+→ build web / app / onefile → demo-mode API smoke test (`/api/health`, signup).
+
+Runtime dependencies must stay at **0 high/critical vulnerabilities** — that gate is
+the one to keep green. The report-only full audit exists because the remaining high
+advisories are transitive under `@capacitor/cli` (Android build tooling, dev-only) and
+need a Capacitor major bump to clear. `pg` and the Capacitor notification packages are
+intentionally *optional* dependencies.
+
+Match CI locally before pushing: tests green, runtime audit clean, all three builds
+succeed.
+
 ## Configuration & environment
 
 - Copy `.env.example` to `.env` for local dev. The key variables:
@@ -241,29 +329,20 @@ entitlement — the server webhook is the source of truth.
 - `capacitor.config.json` configures the Android app (`com.educationacademy.app`).
 - `.claude/hooks/session-start.sh` runs `npm install` on Claude Code web sessions
   so the dev server/build/API are ready immediately (only in the remote environment).
+- `.claude/commands/` holds 15 optimization prompts runnable as slash commands;
+  `TODO.md` tracks which have been applied.
 
 Deeper operational docs live in the repo root: `DEPLOYMENT.md` (Play Store),
 `DEPLOY_WEBSITE.md` (website + API), `PRICING.md`, `COMPLIANCE.md`, `VERIFY.md`,
 `LAUNCH_RUNBOOK.md`, `CHECKLIST.md`.
 
-## The `reelmint/` subproject
+## Git workflow
 
-`reelmint/` is a **standalone, unrelated** application that happens to live in this
-repo. It is a single-service AI content studio (Express API + static web app, **no
-build step**) that turns a prompt into videos/images/copy.
-
-- Its own `reelmint/package.json`, `reelmint/render.yaml`, `reelmint/.env.example`.
-- Uses the **`@anthropic-ai/sdk`** directly (not the proxy pattern above) with a
-  default model of `claude-opus-4-8`, and runs in a clickable **demo mode** when
-  `ANTHROPIC_API_KEY` is unset.
-- Run it with `cd reelmint && npm install && npm start`.
-- **`.github/workflows/ci.yml` targets `reelmint/` only** — it installs, `node --check`s
-  and smoke-tests the reelmint server. The Education Academy app is covered separately
-  by `.github/workflows/main-ci.yml` (audit → `npm test` → syntax-check → all three
-  builds → API smoke test).
-
-Treat changes to `reelmint/` and to the main app as independent. Don't cross-import
-between them.
+- Default branch is `main`. Do work on a feature branch and push with
+  `git push -u origin <branch>`; retry network failures with exponential backoff.
+- **Do not open a pull request unless explicitly asked.**
+- If a designated branch's PR has already merged, restart the branch from the latest
+  `main` for follow-up work rather than stacking onto merged history.
 
 ## Working here — quick checklist
 
@@ -276,10 +355,15 @@ between them.
 - Adding client state? Extend `defaultState()` in `src/lib/progress.js`.
 - Adding a backend route? Use `auth(...)` for protected routes, go through
   `load()`/`save()`, and never return raw user records — shape them like `pub()`.
-- Adding a question to the offline bank? `bank.test.js` enforces the invariants —
+  Add a case to `test/server.test.js`.
+- Adding a question to the offline bank? `test/bank.test.js` enforces the invariants —
   4 distinct non-empty choices, an in-range `answerIndex`, an explanation, no repeated
   question text, and at least a full round (15) per stage/subject.
+- Adding pure client logic? Put the spec beside it as `src/lib/<name>.test.js` so
+  vitest picks it up in the jsdom project.
 - Run `npm test` before committing, and add a test alongside any new route or logic.
 - Verify UI changes by running `npm start` and clicking through the affected flow; run
   `node --check server/index.js` after server edits.
 - Keep the Anthropic/Stripe/ElevenLabs secrets server-side.
+- **Keep this file honest** — update it in the same change as any structural change
+  (new module, new command, schema change, tooling swap).
